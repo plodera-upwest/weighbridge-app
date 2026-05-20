@@ -1,0 +1,851 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-slate-100 text-slate-950;
+    font-family: "Segoe UI", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Arial, sans-serif;
+  }
+
+  input,
+  select,
+  textarea {
+    @apply rounded-md border border-slate-300 bg-white px-3 py-2 text-slate-950 outline-none focus:border-teal-700 focus:ring-4 focus:ring-teal-700/10;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply min-h-10 rounded-md bg-teal-700 px-4 py-2 font-medium text-white hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-secondary {
+    @apply min-h-10 rounded-md border border-slate-300 bg-white px-4 py-2 font-medium text-slate-800 hover:border-teal-700 hover:text-teal-800 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-danger {
+    @apply min-h-10 rounded-md border border-red-200 bg-red-50 px-4 py-2 font-medium text-red-700 hover:border-red-400 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .nav-btn {
+    @apply rounded-md px-3 py-2 text-left font-medium text-slate-500 hover:bg-teal-50 hover:text-teal-800;
+  }
+
+  .nav-btn.active {
+    @apply bg-teal-50 text-teal-800;
+  }
+
+  .panel {
+    @apply rounded-lg border border-slate-200 bg-white p-5 shadow-sm;
+  }
+
+  .field {
+    @apply grid gap-1 text-sm font-medium capitalize text-slate-600;
+  }
+
+  .section-title {
+    @apply mb-2 text-base font-semibold text-slate-950;
+  }
+
+  .camera-setting-card {
+    @apply rounded-md border border-slate-200 bg-slate-50 p-3;
+  }
+
+  .collapsible-setting-card {
+    @apply rounded-md border border-slate-200 bg-slate-50 p-3;
+  }
+
+  .setting-card-summary {
+    @apply grid grid-cols-[minmax(240px,1fr)_auto_auto] items-center gap-3;
+  }
+
+  .camera-card-summary {
+    @apply grid grid-cols-[minmax(220px,1fr)_auto_auto] items-center gap-3;
+  }
+
+  .camera-card-toggle {
+    @apply grid gap-0.5 text-left;
+  }
+
+  .camera-card-toggle strong {
+    @apply text-base font-semibold text-slate-950;
+  }
+
+  .camera-card-toggle span {
+    @apply truncate text-xs text-slate-500;
+  }
+
+  .camera-card-badges {
+    @apply flex flex-wrap justify-end gap-2 text-xs font-medium;
+  }
+
+  .badge-on {
+    @apply rounded-full bg-teal-50 px-2 py-1 text-teal-800;
+  }
+
+  .badge-off {
+    @apply rounded-full bg-slate-200 px-2 py-1 text-slate-600;
+  }
+
+  .data-table {
+    @apply w-full min-w-[760px] border-collapse;
+  }
+
+  .data-table th {
+    @apply border-b border-slate-200 px-3 py-3 text-left text-xs font-medium uppercase text-slate-500;
+  }
+
+  .data-table td {
+    @apply border-b border-slate-100 px-3 py-3 text-sm;
+  }
+
+  .mini-table {
+    @apply w-full min-w-[520px] border-collapse text-sm;
+  }
+
+  .mini-table th,
+  .mini-table td {
+    @apply border-b border-slate-100 px-2 py-2 text-left;
+  }
+
+  .app-shell {
+    min-height: 100vh;
+    display: grid;
+    grid-template-columns: 280px minmax(0, 1fr);
+    background: theme("colors.slate.100");
+  }
+
+  .live-weight {
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-radius: 8px;
+    background: theme("colors.slate.950");
+    padding: 16px 20px;
+    color: white;
+  }
+
+  .live-weight-compact {
+    position: relative;
+    margin-bottom: 0;
+    min-height: 50px;
+    padding: 7px 9px;
+    overflow: hidden;
+  }
+
+  .live-weight-compact p,
+  .live-weight-compact small {
+    font-size: 10px;
+    line-height: 1.05;
+    white-space: nowrap;
+  }
+
+  .live-weight-compact strong {
+    display: block;
+    font-size: 22px;
+    line-height: 1.05;
+    white-space: nowrap;
+  }
+
+  .live-weight-compact span {
+    padding: 3px 8px;
+    font-size: 12px;
+  }
+
+  .compact-indicator-meta {
+    position: absolute;
+    top: 7px;
+    right: 8px;
+    display: grid;
+    justify-items: end;
+    gap: 2px;
+  }
+
+  .compact-indicator-meta span {
+    border-radius: 999px;
+    padding: 2px 6px;
+    font-size: 10px;
+    font-weight: 600;
+  }
+
+  .slip-form select,
+  .slip-form input,
+  .slip-form textarea,
+  .active-slip-box select {
+    font-weight: 400;
+  }
+
+  .compact-indicator-meta .stable {
+    background: theme("colors.teal.100");
+    color: theme("colors.teal.900");
+  }
+
+  .compact-indicator-meta .motion {
+    background: theme("colors.amber.100");
+    color: theme("colors.amber.900");
+  }
+
+  .slip-screen {
+    height: calc(100vh - 48px);
+    min-height: 0;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 10px;
+    overflow: hidden;
+  }
+
+  .slip-grid {
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(320px, 370px) minmax(0, 1fr);
+    gap: 12px;
+    overflow: hidden;
+  }
+
+  .slip-camera-column {
+    min-height: 0;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 8px;
+    overflow: hidden;
+  }
+
+  .slip-panel {
+    min-height: 0;
+    overflow: hidden;
+    padding: 12px;
+  }
+
+  .slip-content {
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  .camera-live-wall {
+    min-height: 0;
+    height: 100%;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+  }
+
+  .camera-live-grid {
+    min-height: 0;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    overflow: hidden;
+    padding-right: 2px;
+  }
+
+  .camera-live-grid figure:first-child:nth-last-child(1) {
+    grid-column: 1 / -1;
+  }
+
+  .camera-live-grid figure:first-child:nth-last-child(3),
+  .camera-live-grid figure:first-child:nth-last-child(3) ~ figure {
+    min-height: 0;
+  }
+
+  .camera-live-grid figure {
+    min-height: 0;
+  }
+
+  .camera-live-grid img {
+    max-height: 20vh;
+  }
+
+  .slip-form {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .slip-form label:nth-child(6),
+  .slip-form button,
+  .slip-form p {
+    grid-column: 1 / -1;
+  }
+
+  .slip-form input,
+  .slip-form select,
+  .slip-form textarea,
+  .active-slip-box input,
+  .active-slip-box select,
+  .active-slip-box textarea {
+    min-height: 34px;
+    padding-top: 6px;
+    padding-bottom: 6px;
+  }
+
+  .slip-form textarea {
+    height: 42px;
+  }
+
+  .active-slip-box {
+    margin-top: 10px;
+    max-height: calc(100vh - 438px);
+    min-height: 128px;
+    overflow: hidden;
+    border-radius: 6px;
+    border: 1px solid theme("colors.slate.200");
+    background: theme("colors.slate.50");
+    padding: 10px;
+  }
+
+  .active-slip-box .mini-table {
+    min-width: 0;
+  }
+
+  .slip-entry-screen {
+    height: calc(100vh - 48px);
+    min-height: 0;
+    display: grid;
+    grid-template-rows: auto auto minmax(0, 1fr);
+    gap: 6px;
+    overflow: hidden;
+  }
+
+  .slip-entry-toolbar {
+    display: grid;
+    grid-template-columns: auto auto auto minmax(220px, 1fr) auto auto auto;
+    align-items: end;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .slip-search {
+    min-width: 220px;
+  }
+
+  .slip-entry-grid {
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 300px;
+    gap: 12px;
+    overflow: hidden;
+  }
+
+  .slip-action-strip {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: auto auto auto minmax(96px, 1fr);
+    align-items: stretch;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .slip-action-strip .btn-primary,
+  .slip-action-strip .btn-secondary {
+    min-height: 40px;
+    white-space: nowrap;
+  }
+
+  .slip-action-error {
+    grid-column: 1 / -1;
+    border-radius: 6px;
+    background: theme("colors.red.50");
+    padding: 8px 10px;
+    color: theme("colors.red.700");
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  .slip-entry-panel {
+    min-height: 0;
+    overflow: auto;
+    padding: 14px;
+  }
+
+  .weighment-form {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .slip-detail-group {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+    gap: 7px;
+    border: 1px solid theme("colors.slate.200");
+    border-radius: 8px;
+    background: theme("colors.slate.50");
+    padding: 8px;
+    min-width: 0;
+  }
+
+  .slip-detail-group-primary {
+    border-color: theme("colors.teal.100");
+    background: linear-gradient(180deg, white, theme("colors.teal.50"));
+  }
+
+  .group-label {
+    grid-column: 1 / -1;
+    margin-bottom: -2px;
+    color: theme("colors.slate.500");
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: uppercase;
+  }
+
+  .weighment-form .field {
+    gap: 4px;
+    font-size: 12px;
+    color: theme("colors.slate.500");
+    min-width: 0;
+  }
+
+  .weighment-form input,
+  .weighment-form select,
+  .weighment-form textarea {
+    min-height: 30px;
+    padding-top: 5px;
+    padding-bottom: 5px;
+    border-color: theme("colors.slate.300");
+    font-weight: 400;
+    min-width: 0;
+  }
+
+  .weighment-form input[readonly] {
+    background: white;
+    color: theme("colors.slate.700");
+  }
+
+  .field-muted input[readonly] {
+    border-color: transparent;
+    background: theme("colors.slate.100");
+  }
+
+  .weight-field input[readonly] {
+    color: theme("colors.slate.950");
+    font-size: 15px;
+    font-weight: 600;
+  }
+
+  .weight-field-net input[readonly] {
+    border-color: theme("colors.teal.200");
+    background: theme("colors.teal.50");
+    color: theme("colors.teal.900");
+  }
+
+  .form-span-2 {
+    grid-column: span 2 / span 2;
+  }
+
+  .form-action-row {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .pause-indicator-group {
+    display: flex;
+    align-items: stretch;
+    gap: 8px;
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  .pause-indicator-group .btn-secondary {
+    flex: 0 0 auto;
+  }
+
+  .action-live-indicator {
+    min-width: 0;
+  }
+
+  .action-live-indicator .live-weight-compact {
+    min-height: 40px;
+    border-radius: 6px;
+    padding: 5px 6px;
+  }
+
+  .action-live-indicator .live-weight-compact strong {
+    font-size: 16px;
+  }
+
+  .action-live-indicator .live-weight-compact p {
+    font-size: 9px;
+  }
+
+  .action-live-indicator .compact-indicator-meta small {
+    display: none;
+  }
+
+  .form-section-head {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 2px;
+  }
+
+  .status-pill {
+    border-radius: 999px;
+    background: theme("colors.teal.50");
+    color: theme("colors.teal.800");
+    padding: 4px 10px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .product-line-editor {
+    margin-top: 12px;
+    display: grid;
+    gap: 8px;
+  }
+
+  .product-line-form {
+    grid-template-columns: minmax(110px, 1.3fr) minmax(82px, 0.9fr) minmax(70px, 0.75fr) minmax(52px, 0.55fr) minmax(68px, 0.75fr) minmax(68px, 0.75fr);
+    gap: 6px;
+  }
+
+  .product-line-form .field {
+    gap: 3px;
+    font-size: 11px;
+  }
+
+  .product-line-form input,
+  .product-line-form select {
+    min-height: 28px;
+    padding: 3px 6px;
+    font-size: 12px;
+  }
+
+  .compact-table-wrap {
+    max-height: 180px;
+    overflow: auto;
+    border: 1px solid theme("colors.slate.200");
+    border-radius: 6px;
+    background: white;
+  }
+
+  .slip-live-panel {
+    min-height: 0;
+    display: grid;
+    gap: 8px;
+    overflow: hidden;
+  }
+
+  .slip-live-panel .camera-live-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .slip-live-panel .camera-live-grid img {
+    max-height: 15vh;
+  }
+
+  .slip-actions-panel {
+    display: grid;
+    gap: 8px;
+    padding: 12px;
+  }
+}
+
+@media (max-width: 1024px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .camera-card-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .setting-card-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .camera-card-badges {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 1024px) {
+  .app-shell.slip-app {
+    height: 100vh;
+    overflow: hidden;
+    grid-template-columns: 120px minmax(0, 1fr);
+  }
+
+  .slip-app aside {
+    position: static;
+    height: 100vh;
+    gap: 10px;
+    padding: 12px;
+    overflow: hidden;
+  }
+
+  .slip-app aside .brand-mark {
+    width: 36px;
+    height: 36px;
+  }
+
+  .slip-app aside .brand {
+    gap: 8px;
+  }
+
+  .slip-app aside .brand strong {
+    font-size: 12px;
+    line-height: 1.15;
+  }
+
+  .slip-app aside .brand small,
+  .slip-app aside .operator-card small {
+    font-size: 11px;
+  }
+
+  .slip-app .app-nav {
+    gap: 4px;
+  }
+
+  .slip-app .nav-btn {
+    padding: 7px 6px;
+    font-size: 12px;
+  }
+
+  .slip-app .operator-card {
+    padding-top: 10px;
+    font-size: 12px;
+  }
+
+  .slip-app .operator-card .btn-secondary {
+    min-height: 34px;
+    padding: 6px 8px;
+  }
+
+  .slip-app .slip-content {
+    height: 100vh;
+    overflow: hidden;
+    padding: 4px 8px 8px;
+  }
+
+  .slip-app .slip-screen {
+    height: calc(100vh - 20px);
+    overflow: hidden;
+  }
+
+  .slip-app .slip-grid {
+    grid-template-columns: minmax(245px, 1fr) minmax(145px, 0.72fr);
+    gap: 8px;
+    overflow: hidden;
+  }
+
+  .slip-app .slip-entry-screen {
+    height: calc(100vh - 20px);
+    gap: 4px;
+  }
+
+  .slip-app .slip-entry-screen > header h2 {
+    line-height: 1.08;
+  }
+
+  .slip-app .slip-entry-grid {
+    grid-template-columns: minmax(0, 1fr) 90px;
+    gap: 8px;
+  }
+
+  .slip-app .slip-action-strip {
+    grid-template-columns: 32px 80px 94px minmax(106px, 1fr);
+    gap: 4px;
+  }
+
+  .slip-app .slip-entry-panel {
+    padding: 8px;
+  }
+
+  .slip-app .slip-entry-toolbar {
+    grid-template-columns: auto auto auto minmax(160px, 1fr) auto auto auto;
+    gap: 6px;
+  }
+
+  .slip-app .slip-entry-toolbar .btn-secondary,
+  .slip-app .slip-entry-toolbar .btn-primary,
+  .slip-app .slip-action-strip .btn-secondary,
+  .slip-app .slip-action-strip .btn-primary {
+    min-height: 30px;
+    padding: 4px 3px;
+    font-size: 10px;
+  }
+
+  .slip-app .weighment-form {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .slip-app .product-line-form {
+    grid-template-columns: minmax(82px, 1.25fr) minmax(64px, 0.85fr) minmax(56px, 0.7fr) minmax(38px, 0.45fr) minmax(50px, 0.6fr) minmax(50px, 0.6fr);
+    gap: 4px;
+  }
+
+  .slip-app .slip-detail-group {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    padding: 7px;
+  }
+
+  .slip-app .action-live-indicator {
+    min-width: 0;
+  }
+
+  .slip-app .action-live-indicator .live-weight-compact {
+    min-height: 30px;
+    padding: 4px 5px;
+  }
+
+  .slip-app .action-live-indicator .live-weight-compact strong {
+    font-size: 13px;
+  }
+
+  .slip-app .action-live-indicator .live-weight-compact p {
+    font-size: 8px;
+  }
+
+  .slip-app .slip-detail-group-primary {
+    background: theme("colors.teal.50");
+  }
+
+  .slip-app .group-label {
+    font-size: 10px;
+  }
+
+  .slip-app .weighment-form input,
+  .slip-app .weighment-form select,
+  .slip-app .weighment-form textarea {
+    min-height: 29px;
+    padding: 4px 7px;
+    font-size: 12px;
+  }
+
+  .slip-app .product-line-form .field {
+    gap: 2px;
+    font-size: 10px;
+  }
+
+  .slip-app .product-line-form input,
+  .slip-app .product-line-form select {
+    min-height: 25px;
+    padding: 2px 4px;
+    font-size: 11px;
+  }
+
+  .slip-app .slip-actions-panel {
+    padding: 10px;
+    gap: 6px;
+  }
+
+  .slip-app .slip-panel {
+    overflow: hidden;
+    padding: 10px;
+  }
+
+  .slip-app .field {
+    font-size: 11px;
+  }
+
+  .slip-app .slip-form {
+    gap: 6px;
+  }
+
+  .slip-app .slip-form input,
+  .slip-app .slip-form select,
+  .slip-app .slip-form textarea,
+  .slip-app .active-slip-box select {
+    min-height: 30px;
+    padding: 4px 8px;
+    font-size: 12px;
+  }
+
+  .slip-app .slip-form textarea {
+    height: 42px;
+  }
+
+  .slip-app .active-slip-box {
+    margin-top: 8px;
+    min-height: 122px;
+    max-height: calc(100vh - 388px);
+    padding: 8px;
+  }
+
+  .slip-app .camera-live-grid {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .slip-app .camera-live-grid img {
+    max-height: 13.25vh;
+  }
+
+  .slip-app .camera-live-grid figcaption {
+    display: flex;
+    justify-content: space-between;
+    gap: 6px;
+    padding-top: 3px;
+    padding-bottom: 3px;
+  }
+}
+
+@media (max-width: 1024px) {
+  .app-shell:not(.slip-app) .slip-content {
+    height: auto;
+    overflow: visible;
+  }
+
+  .app-shell:not(.slip-app) .slip-screen {
+    height: auto;
+    overflow: visible;
+  }
+
+  .app-shell:not(.slip-app) .slip-grid {
+    grid-template-columns: 1fr;
+    overflow: visible;
+  }
+
+  .app-shell:not(.slip-app) .slip-panel {
+    overflow: visible;
+  }
+
+  .app-shell:not(.slip-app) .camera-live-wall {
+    height: auto;
+  }
+
+  .app-shell:not(.slip-app) .camera-live-grid {
+    grid-template-columns: 1fr;
+    overflow: visible;
+  }
+
+  .app-shell:not(.slip-app) .camera-live-grid img {
+    max-height: none;
+  }
+
+  .app-shell:not(.slip-app) .slip-form {
+    grid-template-columns: 1fr;
+  }
+
+  .app-shell:not(.slip-app) .active-slip-box {
+    max-height: none;
+    overflow: visible;
+  }
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  .print-area,
+  .print-area * {
+    visibility: visible;
+  }
+
+  .print-area {
+    position: fixed;
+    inset: 0;
+    padding: 20px;
+  }
+}

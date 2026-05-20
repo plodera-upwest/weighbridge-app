@@ -1,0 +1,44 @@
+{
+  "name": "weighbridge-web-system",
+  "version": "0.1.0",
+  "private": true,
+  "description": "React, Express, PostgreSQL-ready weighbridge management system",
+  "scripts": {
+    "build": "npm run build:frontend && npm run build:backend && npm run build:device",
+    "build:frontend": "vite build --config frontend/vite.config.ts",
+    "build:backend": "tsc -p backend/tsconfig.json",
+    "build:device": "tsc -p device-service/tsconfig.json",
+    "start": "node backend/dist/server.js",
+    "dev:frontend": "vite --config frontend/vite.config.ts --host 127.0.0.1 --port 4175",
+    "dev:backend": "tsx watch backend/src/server.ts",
+    "dev:device": "tsx watch device-service/src/server.ts",
+    "prisma:generate": "prisma generate --schema database/schema.prisma"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.8.2",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/cookie-parser": "^1.4.7",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.10.2",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "prisma": "^6.8.2",
+    "tailwindcss": "^3.4.17",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.3"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

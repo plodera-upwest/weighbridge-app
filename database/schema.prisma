@@ -1,0 +1,213 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  WEIGHBRIDGE_OPERATOR
+  ACCOUNTS
+  STORE_DISPATCH
+  VIEWER
+}
+
+enum TransactionStatus {
+  OPEN
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum TransactionMode {
+  SINGLE
+  MULTIPLE
+}
+
+enum PartyType {
+  CUSTOMER
+  SUPPLIER
+}
+
+enum CameraPosition {
+  FRONT
+  REAR
+  SIDE
+}
+
+enum WeighmentType {
+  FIRST
+  FINAL
+}
+
+model User {
+  id           String        @id @default(cuid())
+  name         String
+  username     String        @unique
+  passwordHash String
+  role         Role
+  active       Boolean       @default(true)
+  createdAt    DateTime      @default(now())
+  transactions Transaction[]
+  auditLogs    AuditLog[]
+}
+
+model Vehicle {
+  id           String        @id @default(cuid())
+  vehicleNo    String        @unique
+  transporter  String?
+  transactions Transaction[]
+}
+
+model Driver {
+  id           String        @id @default(cuid())
+  name         String
+  phone        String?
+  transactions Transaction[]
+}
+
+model Party {
+  id           String        @id @default(cuid())
+  name         String
+  type         PartyType
+  phone        String?
+  transactions Transaction[]
+}
+
+model Product {
+  id             String              @id @default(cuid())
+  name           String              @unique
+  unit           String              @default("kg")
+  productEntries ProductWeightEntry[]
+}
+
+model Transaction {
+  id             String              @id @default(cuid())
+  transactionNo  String              @unique
+  mode           TransactionMode
+  status         TransactionStatus   @default(OPEN)
+  vehicleId      String
+  driverId       String
+  partyId        String
+  transporter    String?
+  destination    String?
+  driverIdentity String?
+  shift          String?
+  weighbridgeId  String?
+  weighbridgeName String?
+  firstWeight    Int?
+  finalWeight    Int?
+  netWeight      Int?
+  firstWeighedAt DateTime?
+  finalWeighedAt DateTime?
+  remarks        String?
+  operatorId     String
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  vehicle        Vehicle             @relation(fields: [vehicleId], references: [id])
+  driver         Driver              @relation(fields: [driverId], references: [id])
+  party          Party               @relation(fields: [partyId], references: [id])
+  operator       User                @relation(fields: [operatorId], references: [id])
+  productEntries ProductWeightEntry[]
+  cameraImages   CameraImage[]
+  reprints       ReprintLog[]
+}
+
+model ProductWeightEntry {
+  id            String      @id @default(cuid())
+  transactionId String
+  productId     String
+  unit          String       @default("kg")
+  packageCount  Int          @default(0)
+  tareWeight    Int          @default(0)
+  packingMode   String?
+  packingTare   Int          @default(0)
+  sequence      Int
+  grossWeight   Int
+  previousWeight Int
+  productWeight Int
+  remarks       String?
+  capturedAt    DateTime    @default(now())
+  operatorName  String
+  transaction   Transaction @relation(fields: [transactionId], references: [id])
+  product       Product     @relation(fields: [productId], references: [id])
+}
+
+model CameraImage {
+  id            String         @id @default(cuid())
+  transactionId String
+  cameraId      String
+  cameraName    String
+  weighmentType WeighmentType
+  position      CameraPosition
+  imageUrl      String
+  capturedAt    DateTime       @default(now())
+  transaction   Transaction    @relation(fields: [transactionId], references: [id])
+}
+
+model CameraSetting {
+  id             String         @id @default(cuid())
+  name           String
+  classification String         @default("Weighbridge slip")
+  position       CameraPosition
+  rtspUrl        String
+  username       String?
+  password       String?
+  captureTiming  WeighmentType?
+  displayOnSlip  Boolean        @default(true)
+  displayOrder   Int            @default(1)
+  active         Boolean        @default(true)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+}
+
+model WeighbridgeSetting {
+  id              String   @id @default(cuid())
+  name            String
+  location        String?
+  active          Boolean  @default(true)
+  displayOrder    Int      @default(1)
+  connectionType  String   @default("simulator")
+  comPort         String?
+  baudRate        Int      @default(9600)
+  dataBits        Int      @default(8)
+  stopBits        Int      @default(1)
+  parity          String   @default("none")
+  tcpHost         String?
+  tcpPort         Int      @default(4001)
+  weightFormat    String?
+  stableDetection Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model ReprintLog {
+  id            String      @id @default(cuid())
+  transactionId String
+  userName      String
+  reason        String?
+  createdAt     DateTime    @default(now())
+  transaction   Transaction @relation(fields: [transactionId], references: [id])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String
+  userName   String
+  action     String
+  entityType String
+  entityId   String
+  details    String?
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id])
+}
+
+model SystemSetting {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  value       Json
+  updatedAt   DateTime @updatedAt
+}

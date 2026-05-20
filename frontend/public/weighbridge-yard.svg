@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" role="img" aria-label="Truck on an industrial weighbridge platform">
+  <defs>
+    <linearGradient id="sky" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#a8c7d7"/>
+      <stop offset="0.55" stop-color="#d8e4e8"/>
+      <stop offset="1" stop-color="#eef2ed"/>
+    </linearGradient>
+    <linearGradient id="ground" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#6e7c80"/>
+      <stop offset="1" stop-color="#313b40"/>
+    </linearGradient>
+  </defs>
+  <rect width="1600" height="1000" fill="url(#sky)"/>
+  <path d="M0 570h1600v430H0z" fill="url(#ground)"/>
+  <path d="M0 560c210-78 405-95 585-52 167 40 309 38 461-11 184-60 369-45 554 44v459H0z" fill="#526065" opacity=".55"/>
+  <g opacity=".55">
+    <rect x="1120" y="230" width="62" height="330" fill="#59686f"/>
+    <rect x="1194" y="190" width="54" height="370" fill="#4d5c63"/>
+    <rect x="1270" y="260" width="70" height="300" fill="#65747a"/>
+    <rect x="1055" y="310" width="45" height="250" fill="#738188"/>
+  </g>
+  <g transform="translate(125 515)">
+    <path d="M0 235h1125l110 82H88z" fill="#111c24" opacity=".35"/>
+    <path d="M90 155h1010l92 62H20z" fill="#c5c9c8"/>
+    <path d="M120 172h940l48 30H72z" fill="#7d898a"/>
+    <path d="M132 183h915" stroke="#384247" stroke-width="12" stroke-linecap="round" opacity=".52"/>
+  </g>
+  <g transform="translate(315 393)">
+    <path d="M116 158h570c54 0 96 42 96 96v40H45v-65c0-39 32-71 71-71z" fill="#c37f20"/>
+    <path d="M515 78h172c39 0 76 20 97 54l58 96H515z" fill="#e5a236"/>
+    <path d="M551 107h106c23 0 44 11 56 30l39 63H551z" fill="#214354"/>
+    <path d="M70 134h440v94H70z" fill="#d89025"/>
+    <path d="M90 105h360v38H90z" fill="#edb24c"/>
+    <circle cx="198" cy="296" r="70" fill="#172027"/>
+    <circle cx="198" cy="296" r="34" fill="#7e8a8b"/>
+    <circle cx="653" cy="296" r="70" fill="#172027"/>
+    <circle cx="653" cy="296" r="34" fill="#7e8a8b"/>
+    <path d="M4 294h860" stroke="#263239" stroke-width="18" stroke-linecap="round"/>
+    <path d="M548 228h312v48H548z" fill="#a5671d"/>
+  </g>
+  <g transform="translate(1055 410)">
+    <rect x="0" y="0" width="190" height="190" rx="8" fill="#f2f5f2"/>
+    <rect x="18" y="24" width="154" height="62" rx="4" fill="#17242d"/>
+    <rect x="35" y="44" width="118" height="22" rx="2" fill="#73d6c6"/>
+    <rect x="32" y="112" width="126" height="12" fill="#9ca8aa"/>
+    <rect x="32" y="138" width="95" height="12" fill="#9ca8aa"/>
+  </g>
+</svg>

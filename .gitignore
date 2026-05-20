@@ -1,0 +1,8 @@
+data/*.json
+node_modules/
+.next/
+frontend/dist/
+backend/dist/
+device-service/dist/
+*.log
+.env
