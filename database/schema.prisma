@@ -53,6 +53,8 @@ model User {
   createdAt    DateTime      @default(now())
   transactions Transaction[]
   auditLogs    AuditLog[]
+
+  @@index([role, active, createdAt], map: "idx_users_role_active_created_at")
 }
 
 model Vehicle {
@@ -60,6 +62,8 @@ model Vehicle {
   vehicleNo    String        @unique
   transporter  String?
   transactions Transaction[]
+
+  @@index([transporter], map: "idx_vehicles_transporter")
 }
 
 model Driver {
@@ -67,6 +71,8 @@ model Driver {
   name         String
   phone        String?
   transactions Transaction[]
+
+  @@index([name], map: "idx_drivers_name")
 }
 
 model Party {
@@ -75,6 +81,8 @@ model Party {
   type         PartyType
   phone        String?
   transactions Transaction[]
+
+  @@index([type, name], map: "idx_parties_type_name")
 }
 
 model Product {
@@ -114,6 +122,16 @@ model Transaction {
   productEntries ProductWeightEntry[]
   cameraImages   CameraImage[]
   reprints       ReprintLog[]
+
+  @@index([status, createdAt(sort: Desc)], map: "idx_transactions_status_created_at")
+  @@index([createdAt(sort: Desc)], map: "idx_transactions_created_at")
+  @@index([firstWeighedAt(sort: Desc)], map: "idx_transactions_first_weighed_at")
+  @@index([finalWeighedAt(sort: Desc)], map: "idx_transactions_final_weighed_at")
+  @@index([vehicleId, createdAt(sort: Desc)], map: "idx_transactions_vehicle_created_at")
+  @@index([driverId, createdAt(sort: Desc)], map: "idx_transactions_driver_created_at")
+  @@index([partyId, createdAt(sort: Desc)], map: "idx_transactions_party_created_at")
+  @@index([operatorId, createdAt(sort: Desc)], map: "idx_transactions_operator_created_at")
+  @@index([status, partyId, createdAt(sort: Desc)], map: "idx_transactions_status_party_created_at")
 }
 
 model ProductWeightEntry {
@@ -134,6 +152,10 @@ model ProductWeightEntry {
   operatorName  String
   transaction   Transaction @relation(fields: [transactionId], references: [id])
   product       Product     @relation(fields: [productId], references: [id])
+
+  @@index([transactionId, sequence], map: "idx_product_entries_transaction_sequence")
+  @@index([productId, capturedAt(sort: Desc)], map: "idx_product_entries_product_captured_at")
+  @@index([capturedAt(sort: Desc)], map: "idx_product_entries_captured_at")
 }
 
 model CameraImage {
@@ -146,6 +168,9 @@ model CameraImage {
   imageUrl      String
   capturedAt    DateTime       @default(now())
   transaction   Transaction    @relation(fields: [transactionId], references: [id])
+
+  @@index([transactionId, capturedAt], map: "idx_camera_images_transaction_captured_at")
+  @@index([cameraId, capturedAt], map: "idx_camera_images_camera_captured_at")
 }
 
 model CameraSetting {
@@ -162,6 +187,8 @@ model CameraSetting {
   active         Boolean        @default(true)
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
+
+  @@index([active, displayOnSlip, displayOrder], map: "idx_camera_settings_active_display")
 }
 
 model WeighbridgeSetting {
@@ -182,6 +209,8 @@ model WeighbridgeSetting {
   stableDetection Boolean  @default(true)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+
+  @@index([active, displayOrder], map: "idx_weighbridge_settings_active_order")
 }
 
 model ReprintLog {
@@ -191,6 +220,9 @@ model ReprintLog {
   reason        String?
   createdAt     DateTime    @default(now())
   transaction   Transaction @relation(fields: [transactionId], references: [id])
+
+  @@index([transactionId, createdAt(sort: Desc)], map: "idx_reprint_logs_transaction_created_at")
+  @@index([createdAt(sort: Desc)], map: "idx_reprint_logs_created_at")
 }
 
 model AuditLog {
@@ -203,6 +235,11 @@ model AuditLog {
   details    String?
   createdAt  DateTime @default(now())
   user       User     @relation(fields: [userId], references: [id])
+
+  @@index([createdAt(sort: Desc)], map: "idx_audit_logs_created_at")
+  @@index([userId, createdAt(sort: Desc)], map: "idx_audit_logs_user_created_at")
+  @@index([action, createdAt(sort: Desc)], map: "idx_audit_logs_action_created_at")
+  @@index([entityType, entityId, createdAt(sort: Desc)], map: "idx_audit_logs_entity_created_at")
 }
 
 model SystemSetting {

@@ -12,13 +12,18 @@
     "dev:frontend": "vite --config frontend/vite.config.ts --host 127.0.0.1 --port 4175",
     "dev:backend": "tsx watch backend/src/server.ts",
     "dev:device": "tsx watch device-service/src/server.ts",
-    "prisma:generate": "prisma generate --schema database/schema.prisma"
+    "prisma:generate": "prisma generate --schema database/schema.prisma",
+    "db:migrate:deploy": "prisma migrate deploy --schema database/schema.prisma",
+    "db:indexes:apply": "node database/scripts/apply-performance-indexes.mjs",
+    "license:generate": "node database/scripts/generate-license.mjs"
   },
   "dependencies": {
     "@prisma/client": "^6.8.2",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "express": "^4.19.2",
+    "lucide-react": "^1.16.0",
+    "playwright": "^1.60.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },

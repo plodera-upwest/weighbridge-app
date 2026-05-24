@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { createTrialLicense } from "./license";
 import { AuditLog, Db, Role, Settings } from "./types";
 
 const DATA_DIR = path.join(process.cwd(), "data");
@@ -11,7 +12,28 @@ export function uid(prefix: string) {
 }
 
 export function hashPassword(password: string) {
-  return crypto.createHash("sha256").update(password).digest("hex");
+  const salt = crypto.randomBytes(16).toString("hex");
+  const hash = crypto.scryptSync(password, salt, 64).toString("hex");
+  return `scrypt$${salt}$${hash}`;
+}
+
+export function verifyPassword(password: string, storedHash: string) {
+  if (storedHash.startsWith("scrypt$")) {
+    const [, salt, expected] = storedHash.split("$");
+    if (!salt || !expected) return false;
+    const actual = crypto.scryptSync(password, salt, 64);
+    const expectedBuffer = Buffer.from(expected, "hex");
+    return actual.length === expectedBuffer.length && crypto.timingSafeEqual(actual, expectedBuffer);
+  }
+
+  const legacyHash = crypto.createHash("sha256").update(password).digest("hex");
+  const actual = Buffer.from(legacyHash, "hex");
+  const expected = Buffer.from(storedHash, "hex");
+  return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
+}
+
+export function needsPasswordRehash(storedHash: string) {
+  return !storedHash.startsWith("scrypt$");
 }
 
 function strongPassword(password: string) {
@@ -32,6 +54,8 @@ const settings: Settings = {
   slipManualCameraCaptureEnabled: false,
   slipWeighbridgeNodeVisible: false,
   slipShiftVisible: false,
+  slipSelectVehicleVisible: false,
+  slipSearchControlsVisible: false,
   device: {
     connectionType: "simulator",
     comPort: "COM1",
@@ -96,7 +120,8 @@ const seedDb: Db = {
   ],
   transactions: [],
   auditLogs: [],
-  settings
+  settings,
+  license: createTrialLicense(settings)
 };
 
 export function readDb(): Db {
@@ -104,6 +129,11 @@ export function readDb(): Db {
   if (!fs.existsSync(DB_PATH)) writeDb(seedDb);
   const db = JSON.parse(fs.readFileSync(DB_PATH, "utf8")) as Db;
   let changed = false;
+
+  if (!db.license) {
+    db.license = createTrialLicense(db.settings);
+    changed = true;
+  }
 
   if (typeof db.settings.slipManualCameraCaptureEnabled !== "boolean") {
     db.settings.slipManualCameraCaptureEnabled = false;
@@ -117,6 +147,16 @@ export function readDb(): Db {
 
   if (typeof db.settings.slipShiftVisible !== "boolean") {
     db.settings.slipShiftVisible = false;
+    changed = true;
+  }
+
+  if (typeof db.settings.slipSelectVehicleVisible !== "boolean") {
+    db.settings.slipSelectVehicleVisible = false;
+    changed = true;
+  }
+
+  if (typeof db.settings.slipSearchControlsVisible !== "boolean") {
+    db.settings.slipSearchControlsVisible = false;
     changed = true;
   }
 

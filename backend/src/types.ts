@@ -112,6 +112,8 @@ export type Settings = {
   slipManualCameraCaptureEnabled: boolean;
   slipWeighbridgeNodeVisible: boolean;
   slipShiftVisible: boolean;
+  slipSelectVehicleVisible: boolean;
+  slipSearchControlsVisible: boolean;
   device: {
     connectionType: "serial" | "tcp" | "simulator";
     comPort: string;
@@ -156,6 +158,37 @@ export type Settings = {
   }>;
 };
 
+export type LicensePayload = {
+  licenseId: string;
+  customerName: string;
+  issuedAt: string;
+  expiresAt: string;
+  maxUsers: number;
+  maxWeighbridges: number;
+  modules: string[];
+};
+
+export type LicenseRecord = {
+  key: string;
+  payload: LicensePayload;
+  activatedAt: string;
+  activatedBy: string;
+};
+
+export type LicenseStatus = {
+  state: "ACTIVE" | "TRIAL" | "EXPIRED" | "MISSING" | "INVALID";
+  valid: boolean;
+  message: string;
+  licenseId?: string;
+  customerName?: string;
+  issuedAt?: string;
+  expiresAt?: string;
+  daysRemaining?: number;
+  maxUsers?: number;
+  maxWeighbridges?: number;
+  modules?: string[];
+};
+
 export type Db = {
   meta: { transactionSequence: number };
   sessions: Record<string, { userId: string; expiresAt: string }>;
@@ -167,4 +200,5 @@ export type Db = {
   transactions: Transaction[];
   auditLogs: AuditLog[];
   settings: Settings;
+  license?: LicenseRecord;
 };

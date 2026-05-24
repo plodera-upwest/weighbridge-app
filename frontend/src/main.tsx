@@ -1,5 +1,6 @@
 import React, { FormEvent, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { BarChart3, History, LayoutDashboard, Package, Scale, Settings as SettingsIcon, Truck, User, Users as UsersIcon, type LucideIcon } from "lucide-react";
 import "./styles.css";
 
 type Role = "ADMIN" | "WEIGHBRIDGE_OPERATOR" | "ACCOUNTS" | "STORE_DISPATCH" | "VIEWER";
@@ -7,10 +8,24 @@ type Status = "OPEN" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
 type TransactionMode = "SINGLE" | "MULTIPLE";
 
 type User = { id: string; name: string; username: string; role: Role; permissions: string[] };
+type LicenseStatus = {
+  state: "ACTIVE" | "TRIAL" | "EXPIRED" | "MISSING" | "INVALID";
+  valid: boolean;
+  message: string;
+  licenseId?: string;
+  customerName?: string;
+  issuedAt?: string;
+  expiresAt?: string;
+  daysRemaining?: number;
+  maxUsers?: number;
+  maxWeighbridges?: number;
+  modules?: string[];
+};
 type Vehicle = { id: string; vehicleNo: string; transporter: string };
 type Driver = { id: string; name: string; phone: string };
 type Party = { id: string; name: string; type: "CUSTOMER" | "SUPPLIER"; phone: string };
 type Product = { id: string; name: string; unit: string };
+type QuickAddKind = "vehicle" | "party" | "driver";
 type ProductEntry = { id: string; productId: string; productName: string; unit: string; packageCount: number; tareWeight: number; packingMode: string; packingTare: number; sequence: number; grossWeight: number; previousWeight: number; productWeight: number; remarks: string; capturedAt: string; operatorName: string };
 type CameraPosition = "FRONT" | "REAR" | "SIDE";
 type WeighbridgeSetting = {
@@ -49,8 +64,11 @@ type Transaction = {
   transactionNo: string;
   mode: TransactionMode;
   status: Status;
+  vehicleId: string;
   vehicleNo: string;
+  driverId: string;
   driverName: string;
+  partyId: string;
   partyName: string;
   transporter: string;
   destination: string;
@@ -76,6 +94,8 @@ type Settings = {
   slipManualCameraCaptureEnabled: boolean;
   slipWeighbridgeNodeVisible: boolean;
   slipShiftVisible: boolean;
+  slipSelectVehicleVisible: boolean;
+  slipSearchControlsVisible: boolean;
   device: Record<string, string | number | boolean>;
   weighbridges: WeighbridgeSetting[];
   cameras: CameraSetting[];
@@ -84,6 +104,7 @@ type Settings = {
 type AppData = {
   user: User | null;
   settings: Settings | null;
+  license: LicenseStatus | null;
   vehicles: Vehicle[];
   drivers: Driver[];
   parties: Party[];
@@ -96,6 +117,7 @@ type LiveReading = { weight: number; stable: boolean; source: string; weighbridg
 const emptyData: AppData = {
   user: null,
   settings: null,
+  license: null,
   vehicles: [],
   drivers: [],
   parties: [],
@@ -104,14 +126,23 @@ const emptyData: AppData = {
 };
 
 async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(path, {
-    credentials: "include",
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
-    ...options
-  });
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      credentials: "include",
+      headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+      ...options
+    });
+  } catch {
+    throw new Error("Network error. Check the server connection and try again.");
+  }
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.error || "Request failed");
+  if (!response.ok) throw new Error(payload.error || `Request failed with status ${response.status}`);
   return payload;
+}
+
+function errorMessage(error: unknown, fallback = "Something went wrong") {
+  return error instanceof Error && error.message ? error.message : fallback;
 }
 
 function formObject(form: HTMLFormElement) {
@@ -152,6 +183,7 @@ function App() {
   const [data, setData] = useState<AppData>(emptyData);
   const [active, setActive] = useState("Dashboard");
   const [error, setError] = useState("");
+  const [systemError, setSystemError] = useState("");
   const [toast, setToast] = useState("");
   const [liveWeight, setLiveWeight] = useState<LiveReading>({ weight: 0, stable: false, source: "offline" });
   const [selected, setSelected] = useState<Transaction | null>(null);
@@ -162,19 +194,40 @@ function App() {
     (flash as unknown as { timer?: number }).timer = window.setTimeout(() => setToast(""), 2800);
   };
 
+  const reportError = (err: unknown, fallback = "Action failed") => {
+    const message = errorMessage(err, fallback);
+    setSystemError(message);
+    flash(message);
+  };
+
   const refresh = async () => {
-    const [me, master, transactions] = await Promise.all([
-      api<{ user: User; settings: Settings }>("/api/me"),
-      api<Omit<AppData, "user" | "settings" | "transactions">>("/api/master-data"),
-      api<Transaction[]>("/api/transactions")
-    ]);
-    setData({ user: me.user, settings: me.settings, transactions, ...master });
+    try {
+      const me = await api<{ user: User; settings: Settings; license: LicenseStatus }>("/api/me");
+      if (!me.license.valid) {
+        setData({ ...emptyData, user: me.user, settings: me.settings, license: me.license });
+        return;
+      }
+      const [master, transactions] = await Promise.all([
+        api<Omit<AppData, "user" | "settings" | "license" | "transactions">>("/api/master-data"),
+        api<Transaction[]>("/api/transactions")
+      ]);
+      setData({ user: me.user, settings: me.settings, license: me.license, transactions, ...master });
+      setSystemError("");
+    } catch (err) {
+      reportError(err, "Could not refresh app data");
+      throw err;
+    }
   };
 
   useEffect(() => {
-    api<{ user: User; settings: Settings }>("/api/me")
+    api<{ user: User; settings: Settings; license: LicenseStatus }>("/api/me")
       .then(() => refresh())
-      .catch(() => setData(emptyData));
+      .catch((err) => {
+        setData(emptyData);
+        if (!String(errorMessage(err)).toLowerCase().includes("authentication required")) {
+          setError(errorMessage(err, "Could not load the app"));
+        }
+      });
   }, []);
 
   useEffect(() => {
@@ -200,13 +253,18 @@ function App() {
       await refresh();
       flash("Signed in");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Login failed");
+      setError(errorMessage(err, "Login failed"));
     }
   };
 
   const logout = async () => {
-    await api("/api/auth/logout", { method: "POST" });
-    setData(emptyData);
+    try {
+      await api("/api/auth/logout", { method: "POST" });
+      setData(emptyData);
+      setSystemError("");
+    } catch (err) {
+      reportError(err, "Could not logout");
+    }
   };
 
   if (!data.user || !data.settings) {
@@ -218,8 +276,8 @@ function App() {
               <p className="text-xs font-medium uppercase text-teal-700">Weighbridge Control</p>
               <h1 className="text-3xl font-semibold text-slate-950">Operator Login</h1>
             </div>
-            <label className="field">Username<input name="username" defaultValue="admin" required /></label>
-            <label className="field">Password<input name="password" type="password" defaultValue="Admin123!" required /></label>
+            <label className="field">Username<input name="username" required autoComplete="username" /></label>
+            <label className="field">Password<input name="password" type="password" required autoComplete="current-password" /></label>
             <button className="btn-primary">Sign in</button>
             <p className="min-h-6 text-sm font-medium text-red-700">{error}</p>
           </form>
@@ -228,14 +286,20 @@ function App() {
     );
   }
 
-  const menu = [
+  if (data.license && !data.license.valid) {
+    return <LicenseGate user={data.user} license={data.license} onRefresh={refresh} onLogout={logout} />;
+  }
+
+  const primaryMenu = [
     "Dashboard",
     "Weighbridge Slip",
     "Vehicles",
     "Drivers",
     "Customers",
     "Products",
-    "Reports",
+    "Reports"
+  ];
+  const utilityMenu = [
     "Audit Logs",
     "Users",
     "Settings"
@@ -245,16 +309,26 @@ function App() {
     <main className={`app-shell ${active === "Weighbridge Slip" ? "slip-app" : ""}`}>
       <aside className="app-sidebar sticky top-0 flex h-screen flex-col gap-6 border-r border-slate-200 bg-white p-5 max-lg:static max-lg:h-auto">
         <div className="brand flex items-center gap-3">
-          <div className="brand-mark grid h-12 w-12 place-items-center rounded-md bg-teal-700 font-semibold text-white">WB</div>
+          <div className="brand-mark grid h-12 w-12 place-items-center rounded-md bg-teal-700 font-semibold text-white">
+            <MenuIcon name="Weighbridge Slip" />
+          </div>
           <div>
             <strong>{data.settings.companyName}</strong>
             <small className="block text-slate-500">{data.settings.siteName}</small>
           </div>
         </div>
         <nav className="app-nav grid gap-2">
-          {menu.map((item) => (
+          {primaryMenu.map((item) => (
             <button key={item} onClick={() => setActive(item)} className={`nav-btn ${active === item ? "active" : ""}`}>
-              {item}
+              <span className="nav-icon"><MenuIcon name={item} /></span>
+              <span>{item}</span>
+            </button>
+          ))}
+          <div className="nav-divider" />
+          {utilityMenu.map((item) => (
+            <button key={item} onClick={() => setActive(item)} className={`nav-btn ${active === item ? "active" : ""}`}>
+              <span className="nav-icon"><MenuIcon name={item} /></span>
+              <span>{item}</span>
             </button>
           ))}
         </nav>
@@ -265,8 +339,13 @@ function App() {
         </div>
       </aside>
 
-      <section className={`min-w-0 p-6 ${active === "Weighbridge Slip" ? "slip-content" : ""}`}>
-        {active !== "Weighbridge Slip" && <LiveWeight reading={liveWeight} />}
+      <section className={`app-content min-w-0 p-6 ${active === "Weighbridge Slip" ? "slip-content" : ""}`}>
+        {systemError && (
+          <div className="app-error-banner" role="alert">
+            <span>{systemError}</span>
+            <button type="button" onClick={() => setSystemError("")}>Cancel</button>
+          </div>
+        )}
         {active === "Dashboard" && <Dashboard transactions={data.transactions} />}
         {active === "Weighbridge Slip" && (
           <Transactions
@@ -326,6 +405,65 @@ function LiveWeight({ reading, compact = false }: { reading: LiveReading; compac
   );
 }
 
+function LicenseGate({ user, license, onRefresh, onLogout }: { user: User; license: LicenseStatus; onRefresh: () => Promise<void>; onLogout: () => Promise<void> }) {
+  const [licenseKey, setLicenseKey] = useState("");
+  const [message, setMessage] = useState("");
+  const [saving, setSaving] = useState(false);
+  const canActivate = can(user, "CHANGE_SETTINGS");
+
+  const activate = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSaving(true);
+    setMessage("");
+    try {
+      await api<LicenseStatus>("/api/license/activate", {
+        method: "POST",
+        body: JSON.stringify({ licenseKey })
+      });
+      setLicenseKey("");
+      await onRefresh();
+    } catch (error) {
+      setMessage(errorMessage(error, "Could not activate license"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <main className="license-page">
+      <section className="license-card">
+        <div>
+          <p className="slip-eyebrow">Licensing</p>
+          <h1>License Activation Required</h1>
+          <p className="license-message">{license.message}</p>
+        </div>
+        <div className="license-status-grid">
+          <span>Status<strong>{license.state}</strong></span>
+          <span>Customer<strong>{license.customerName || "-"}</strong></span>
+          <span>Expiry<strong>{license.expiresAt ? fmtSlipDateTime(license.expiresAt) : "-"}</strong></span>
+          <span>Users<strong>{license.maxUsers || "-"}</strong></span>
+          <span>Weighbridges<strong>{license.maxWeighbridges || "-"}</strong></span>
+        </div>
+        {canActivate ? (
+          <form className="grid gap-3" onSubmit={activate}>
+            <label className="field">License key<textarea value={licenseKey} onChange={(event) => setLicenseKey(event.target.value)} rows={5} placeholder="Paste license key here" required /></label>
+            <div className="flex flex-wrap items-center gap-3">
+              <button className="btn-primary" disabled={saving}>{saving ? "Activating..." : "Activate License"}</button>
+              <button className="btn-secondary" type="button" onClick={onLogout}>Logout</button>
+            </div>
+            {message && <p className="text-sm font-medium text-red-700">{message}</p>}
+          </form>
+        ) : (
+          <div className="grid gap-3">
+            <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm font-medium text-amber-900">Ask an administrator to activate the license.</p>
+            <button className="btn-secondary justify-self-start" type="button" onClick={onLogout}>Logout</button>
+          </div>
+        )}
+      </section>
+    </main>
+  );
+}
+
 function Dashboard({ transactions }: { transactions: Transaction[] }) {
   const completed = transactions.filter((item) => item.status === "COMPLETED");
   const totalNet = completed.reduce((sum, item) => sum + (item.netWeight || 0), 0);
@@ -354,8 +492,12 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
   const [livePaused, setLivePaused] = useState(false);
   const [pausedWeight, setPausedWeight] = useState<number | null>(null);
   const [pendingFirstWeight, setPendingFirstWeight] = useState<{ weight: number; capturedAt: string } | null>(null);
+  const [capturedWeight, setCapturedWeight] = useState<{ weight: number; capturedAt: string } | null>(null);
   const [createError, setCreateError] = useState("");
   const [isCreating, setIsCreating] = useState(false);
+  const [quickAddKind, setQuickAddKind] = useState<QuickAddKind | null>(null);
+  const [quickAddSaving, setQuickAddSaving] = useState(false);
+  const [draftSelection, setDraftSelection] = useState({ vehicleId: "", partyId: "", driverId: "" });
   const [productDraft, setProductDraft] = useState({
     productId: "",
     packingMode: "Loose",
@@ -366,6 +508,12 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
     remarks: ""
   });
   const activeSlip = activeSlipId ? selectableTransactions.find((item) => item.id === activeSlipId) || null : null;
+  const isCompletedSlip = activeSlip?.status === "COMPLETED";
+  const lockLoadedSlipDetails = activeSlip?.status === "IN_PROGRESS" || activeSlip?.status === "COMPLETED";
+  const lockProductEntry = !activeSlip || activeSlip.firstWeight == null || isCompletedSlip;
+  const selectedVehicleId = activeSlip?.vehicleId || draftSelection.vehicleId;
+  const selectedPartyId = activeSlip?.partyId || draftSelection.partyId;
+  const selectedDriverId = activeSlip?.driverId || draftSelection.driverId;
   const activeWeighbridge = data.settings?.weighbridges.find((item) => item.active) || data.settings?.weighbridges[0];
   const shownWeight = livePaused && pausedWeight != null ? pausedWeight : liveWeight.weight;
   const filteredSlips = selectableTransactions.filter((item) => {
@@ -376,7 +524,12 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
   useEffect(() => {
     api<{ slipNo: string }>("/api/transactions/next-slip-no")
       .then((payload) => setNextSlipNo(payload.slipNo))
-      .catch(() => setNextSlipNo("Auto-generated"));
+      .catch((err) => {
+        const message = errorMessage(err, "Could not load next slip number");
+        setNextSlipNo("Auto-generated");
+        setCreateError(message);
+        onToast(message);
+      });
   }, [data.transactions.length]);
 
   useEffect(() => {
@@ -395,8 +548,10 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
   const resetEntry = () => {
     setActiveSlipId("");
     setPendingFirstWeight(null);
+    setCapturedWeight(null);
     setCreateError("");
     setWeighmentType("FIRST");
+    setDraftSelection({ vehicleId: "", partyId: "", driverId: "" });
     setProductDraft({
       productId: "",
       packingMode: "Loose",
@@ -409,23 +564,92 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
     setEntryFormKey((current) => current + 1);
   };
 
-  const create = async (event: FormEvent<HTMLFormElement>) => {
+  const quickAdd = async (kind: QuickAddKind, values: Record<string, string>) => {
+    setQuickAddSaving(true);
+    try {
+      if (kind === "vehicle") {
+        const vehicle = await api<Vehicle>("/api/vehicles", { method: "POST", body: JSON.stringify({ vehicleNo: values.vehicleNo, transporter: "" }) });
+        setDraftSelection((current) => ({ ...current, vehicleId: vehicle.id }));
+        onToast(`Vehicle ${vehicle.vehicleNo} added`);
+      }
+      if (kind === "party") {
+        const party = await api<Party>("/api/parties", { method: "POST", body: JSON.stringify({ name: values.name, type: "CUSTOMER", phone: "" }) });
+        setDraftSelection((current) => ({ ...current, partyId: party.id }));
+        onToast(`Customer ${party.name} added`);
+      }
+      if (kind === "driver") {
+        const driver = await api<Driver>("/api/drivers", { method: "POST", body: JSON.stringify({ name: values.name, phone: "" }) });
+        setDraftSelection((current) => ({ ...current, driverId: driver.id }));
+        onToast(`Driver ${driver.name} added`);
+      }
+      await onRefresh();
+      setQuickAddKind(null);
+    } catch (err) {
+      onToast(errorMessage(err, "Could not add record"));
+    } finally {
+      setQuickAddSaving(false);
+    }
+  };
+
+  const saveSlip = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = event.currentTarget;
     setCreateError("");
     if (activeSlip) {
-      const message = activeSlip.firstWeight == null
-        ? "Capture first weight for the selected slip"
-        : "This slip already has first weight. Add product lines or select 2nd Weight to close it.";
+      if (activeSlip.status === "COMPLETED") {
+        onToast("Completed slips cannot be changed");
+        return;
+      }
+      if (!capturedWeight) {
+        const message = "Capture weight first to save";
+        setCreateError(message);
+        onToast(message);
+        return;
+      }
+      if (weighmentType === "FIRST") {
+        if (activeSlip.firstWeight != null) {
+          const message = "Add product lines or manually select 2nd Weight to close this slip";
+          setCreateError(message);
+          onToast(message);
+          return;
+        }
+        const saved = await action(`/api/transactions/${activeSlip.id}/first-weigh`, { weight: capturedWeight.weight, skipCameraCapture: true }, "First weight saved");
+        if (saved) {
+          setCapturedWeight(null);
+          setPendingFirstWeight(null);
+        }
+        return;
+      }
+      if (activeSlip.firstWeight == null) {
+        const message = "Save first weight before selecting 2nd Weight";
+        setCreateError(message);
+        onToast(message);
+        return;
+      }
+      if (activeSlip.productEntries.length === 0) {
+        const message = "Add product lines before saving 2nd Weight";
+        setCreateError(message);
+        onToast(message);
+        return;
+      }
+      const saved = await action(`/api/transactions/${activeSlip.id}/final-weigh`, { weight: capturedWeight.weight, skipCameraCapture: true }, "Second weight saved");
+      if (saved) setCapturedWeight(null);
+      return;
+    }
+    if (weighmentType === "SECOND") {
+      const message = "Save the first weight before selecting 2nd Weight";
       setCreateError(message);
       onToast(message);
       return;
     }
-    if (!pendingFirstWeight) {
-      setCreateError("Capture weight first to save");
-      onToast("Capture weight first to save");
+    if (!capturedWeight) {
+      const message = "Capture weight first to save";
+      setCreateError(message);
+      onToast(message);
       return;
     }
+    const capturedFirstWeight = capturedWeight;
+    setPendingFirstWeight(capturedFirstWeight);
     setIsCreating(true);
     try {
       const transaction = await api<Transaction>("/api/transactions", {
@@ -433,17 +657,23 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
         body: JSON.stringify({
           ...formObject(form),
           captureInitialWeight: true,
-          initialWeight: pendingFirstWeight.weight
+          initialWeight: capturedFirstWeight.weight
         })
       });
       form.reset();
       await onRefresh();
-      const preview = await api<{ slipNo: string }>("/api/transactions/next-slip-no").catch(() => null);
-      if (preview) setNextSlipNo(preview.slipNo);
+      let previewError = "";
+      try {
+        const preview = await api<{ slipNo: string }>("/api/transactions/next-slip-no");
+        setNextSlipNo(preview.slipNo);
+      } catch (err) {
+        previewError = errorMessage(err, "Slip saved, but next slip number could not be loaded");
+      }
       resetEntry();
-      onToast(`Slip ${transaction.transactionNo} saved. Select it from Select Slip to continue.`);
+      onToast(previewError || `Slip ${transaction.transactionNo} saved. Select it from Select Slip to continue.`);
+      if (previewError) setCreateError(previewError);
     } catch (err) {
-      setCreateError(err instanceof Error ? err.message : "Could not create transaction");
+      setCreateError(errorMessage(err, "Could not create transaction"));
     } finally {
       setIsCreating(false);
     }
@@ -454,26 +684,11 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
       await api(path, { method: "POST", body: JSON.stringify(body) });
       await onRefresh();
       onToast(message);
+      return true;
     } catch (err) {
-      onToast(err instanceof Error ? err.message : "Action failed");
+      onToast(errorMessage(err, "Action failed"));
+      return false;
     }
-  };
-
-  const captureWeight = async () => {
-    if (!activeSlip) {
-      if (weighmentType === "SECOND") {
-        onToast("Save the first weight before selecting 2nd Weight");
-        return;
-      }
-      setPendingFirstWeight({ weight: shownWeight, capturedAt: new Date().toISOString() });
-      onToast("First weight captured. Save to create slip and camera image.");
-      return;
-    }
-    if (weighmentType === "FIRST") {
-      await action(`/api/transactions/${activeSlip.id}/first-weigh`, { weight: shownWeight }, "First weight and camera captured");
-      return;
-    }
-    await action(`/api/transactions/${activeSlip.id}/final-weigh`, { weight: shownWeight }, "Second weight and camera captured");
   };
 
   const captureProduct = async () => {
@@ -481,7 +696,67 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
       onToast("Select an open slip first");
       return;
     }
-    await action(`/api/transactions/${activeSlip.id}/product-weigh`, { ...productDraft, weight: shownWeight }, "Product line captured");
+    if (activeSlip.status === "COMPLETED") {
+      onToast("Completed slips cannot be changed");
+      return;
+    }
+    if (activeSlip.firstWeight == null) {
+      const message = "Capture first weight before adding products";
+      setCreateError(message);
+      onToast(message);
+      return;
+    }
+    if (!capturedWeight) {
+      const message = "Capture weight first before adding product";
+      setCreateError(message);
+      onToast(message);
+      return;
+    }
+    if (!productDraft.productId) {
+      const message = "Product needs to be selected before capturing weight";
+      setCreateError(message);
+      onToast(message);
+      return;
+    }
+    const captured = await action(`/api/transactions/${activeSlip.id}/product-weigh`, { ...productDraft, weight: capturedWeight.weight }, "Product line captured");
+    if (captured) {
+      setCapturedWeight(null);
+      setProductDraft((current) => ({
+        ...current,
+        productId: "",
+        unit: ""
+      }));
+    }
+  };
+
+  const captureWeight = async () => {
+    setCreateError("");
+    if (isCompletedSlip) {
+      onToast("Completed slips cannot be changed");
+      return;
+    }
+    if (!liveWeight.stable) {
+      const message = "Wait for stable weight before capturing";
+      setCreateError(message);
+      onToast(message);
+      return;
+    }
+    const nextCaptured = { weight: shownWeight, capturedAt: new Date().toISOString() };
+    setCapturedWeight(nextCaptured);
+    if (!activeSlip || activeSlip.firstWeight == null) {
+      setPendingFirstWeight(nextCaptured);
+    }
+    if (activeSlip) {
+      const captured = await action(`/api/transactions/${activeSlip.id}/camera-capture`, { weighmentType: weighmentType === "SECOND" ? "FINAL" : "FIRST" }, "Weight and camera captured");
+      if (!captured) {
+        setCapturedWeight(null);
+        if (activeSlip.firstWeight == null) setPendingFirstWeight(null);
+        return;
+      }
+      setCapturedWeight(nextCaptured);
+    } else {
+      onToast("Weight captured. Camera will be attached when the new slip is saved.");
+    }
   };
 
   const captureCamera = async () => {
@@ -495,76 +770,88 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
   const selectedProduct = data.products.find((item) => item.id === productDraft.productId);
 
   return (
-    <section className="slip-entry-screen">
-      <Header eyebrow="Slip Entry" title="Weighment Entry" compact />
-      <div className="slip-entry-toolbar">
-        <button className="btn-secondary" type="button" onClick={resetEntry}>New Entry</button>
-        <button className="btn-secondary" type="button" onClick={() => {
-          resetEntry();
-          onToast("Entry cleared");
-        }}>Cancel</button>
-        <button className="btn-secondary" type="button" onClick={onBack}>Exit / Back</button>
-        <label className="field slip-search">Search<input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="Slip, vehicle, customer" /></label>
-        <button className="btn-secondary" type="button" onClick={() => onToast(`${filteredSlips.length} slip(s) found`)}>Search</button>
-        <button className="btn-secondary" type="button" onClick={() => activeSlip && onView(activeSlip)} disabled={!activeSlip || activeSlip.status !== "COMPLETED"}>Print Slip</button>
-        <button className="btn-secondary" type="button" onClick={() => activeSlip && onView(activeSlip)} disabled={!activeSlip || !can(data.user, "REPRINT_SLIP")}>Reprint Slip</button>
-      </div>
+    <>
+    <section className="weighbridge-page">
+      <header className="weighbridge-topbar">
+        <h1>Weighbridge Management</h1>
+        <div className="weighbridge-top-actions">
+          <span className="topbar-icon" aria-hidden="true">!</span>
+          <span className="topbar-avatar" aria-hidden="true">{data.user?.name?.slice(0, 1) || "U"}</span>
+        </div>
+      </header>
 
-      <div className="slip-entry-grid">
-        <section className="panel slip-entry-panel">
-          <form id="weighment-entry-form" className="weighment-form" key={entryFormKey} onSubmit={create}>
-            <div className="form-section-head">
-              <h3 className="section-title mb-0">Slip Details</h3>
+      <form id="weighment-entry-form" className="weighbridge-workspace" key={`${entryFormKey}-${activeSlip?.id || "new"}`} onSubmit={saveSlip}>
+        <input type="hidden" name="mode" value="MULTIPLE" />
+        {data.settings?.slipShiftVisible ? null : <input type="hidden" name="shift" value={activeSlip?.shift || "Day"} />}
+        {data.settings?.slipWeighbridgeNodeVisible ? null : <input type="hidden" name="weighbridgeId" value={activeSlip?.weighbridgeId || activeWeighbridge?.id || ""} />}
+
+        <section className="weighbridge-column">
+          <div className="slip-primary-actions" aria-label="Slip actions">
+            <button className="btn-primary" type="button" onClick={resetEntry}>New Slip</button>
+            <button className="btn-secondary" type="button" onClick={() => {
+              resetEntry();
+              onToast("Entry cleared");
+            }}>Cancel</button>
+            <button className="btn-primary" type="submit" disabled={isCreating || isCompletedSlip || (!activeSlip && !can(data.user, "CREATE_TRANSACTION"))}>{isCreating ? "Saving..." : "Save"}</button>
+            <button className="btn-secondary" type="button" onClick={() => activeSlip && onView(activeSlip)} disabled={!activeSlip || activeSlip.status !== "COMPLETED"}>Print Slip</button>
+          </div>
+
+          <article className="wb-card transaction-card">
+            <div className="wb-card-head">
+              <h2>Transaction Details</h2>
               <span className="status-pill">{activeSlip?.status || "NEW"}</span>
             </div>
-            <div className="slip-detail-group slip-detail-group-primary">
+            <div className="wb-field-grid wb-two">
               <label className="field field-muted">Slip No<input value={activeSlip?.transactionNo || nextSlipNo} readOnly /></label>
-              <label className="field">Select Slip<select value={activeSlip?.id || ""} onChange={(event) => {
+              <label className="field field-muted">Date Time<input value={activeSlip ? fmtSlipDateTime(activeSlip.createdAt) : fmtSlipDateTime()} readOnly /></label>
+              <label className="field wb-span-2">Select Slip<select value={activeSlip?.id || ""} onChange={(event) => {
                 const selectedSlip = selectableTransactions.find((item) => item.id === event.target.value);
                 setActiveSlipId(event.target.value);
                 setPendingFirstWeight(null);
+                setCapturedWeight(null);
                 setCreateError("");
-                setWeighmentType(selectedSlip?.firstWeight != null && selectedSlip.finalWeight == null ? "SECOND" : "FIRST");
+                setWeighmentType(selectedSlip?.status === "COMPLETED" && selectedSlip.finalWeight != null ? "SECOND" : "FIRST");
               }}>
                 <option value="">New unsaved slip</option>
-                {filteredSlips.map((item) => <option key={item.id} value={item.id}>{item.transactionNo} - {item.vehicleNo} - {item.status}</option>)}
+                {filteredSlips.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {data.settings?.slipSelectVehicleVisible ? `${item.transactionNo} - ${item.vehicleNo}` : item.transactionNo}
+                  </option>
+                ))}
               </select></label>
-              <label className="field field-muted">Date Time<input value={fmtSlipDateTime()} readOnly /></label>
-              <label className="field">Weighment type<select value={weighmentType} onChange={(event) => setWeighmentType(event.target.value as "FIRST" | "SECOND")}><option value="FIRST">1st Weight</option><option value="SECOND">2nd Weight</option></select></label>
-            </div>
-            <div className="slip-detail-group">
-              <span className="group-label">Party and Vehicle</span>
-              <label className="field">Vehicle No<select name="vehicleId" required><option value="">Select vehicle</option>{data.vehicles.map((item) => <option key={item.id} value={item.id}>{item.vehicleNo}</option>)}</select></label>
-              <label className="field">Customer<select name="partyId" required><option value="">Select customer</option>{data.parties.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-              <label className="field">Driver Name<select name="driverId" required><option value="">Select driver</option>{data.drivers.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-              <label className="field">Driver ID<input name="driverIdentity" defaultValue={activeSlip?.driverIdentity || ""} /></label>
-              <label className="field">Transporter<input name="transporter" defaultValue={activeSlip?.transporter || ""} /></label>
-              <label className="field">Destination<input name="destination" defaultValue={activeSlip?.destination || ""} /></label>
-            </div>
-            <div className="slip-detail-group slip-weight-group">
-              <span className="group-label">Weight Capture</span>
-              {data.settings?.slipShiftVisible ? (
-                <label className="field">Shift<select name="shift" defaultValue="Day"><option>Day</option><option>Night</option><option>Morning</option><option>Evening</option></select></label>
-              ) : (
-                <input type="hidden" name="shift" value="Day" />
+              <label className="field wb-span-2">Weighment Type<select value={weighmentType} onChange={(event) => {
+                setCapturedWeight(null);
+                setPendingFirstWeight(null);
+                setWeighmentType(event.target.value as "FIRST" | "SECOND");
+              }} disabled={isCompletedSlip}><option value="FIRST">1st Weight</option><option value="SECOND">2nd Weight</option></select></label>
+              {data.settings?.slipShiftVisible && (
+                <label className="field">Shift<select name="shift" defaultValue={activeSlip?.shift || "Day"} disabled={lockLoadedSlipDetails}><option>Day</option><option>Night</option><option>Morning</option><option>Evening</option></select></label>
               )}
-              {data.settings?.slipWeighbridgeNodeVisible ? (
-                <label className="field">Current weighbridge node<select name="weighbridgeId" defaultValue={activeWeighbridge?.id || ""}>{data.settings?.weighbridges.map((item) => <option key={item.id} value={item.id}>{item.name} {item.active ? "(active)" : "(disabled)"}</option>)}</select></label>
-              ) : (
-                <input type="hidden" name="weighbridgeId" value={activeWeighbridge?.id || ""} />
+              {data.settings?.slipWeighbridgeNodeVisible && (
+                <label className="field">Weighbridge<select name="weighbridgeId" defaultValue={activeSlip?.weighbridgeId || activeWeighbridge?.id || ""} disabled={lockLoadedSlipDetails}>{data.settings?.weighbridges.map((item) => <option key={item.id} value={item.id}>{item.name} {item.active ? "(active)" : "(disabled)"}</option>)}</select></label>
               )}
-              <label className="field field-muted weight-field">First Weight<input value={fmtWeight(activeSlip?.firstWeight ?? pendingFirstWeight?.weight)} readOnly /></label>
-              <label className="field field-muted weight-field">Second Weight<input value={fmtWeight(activeSlip?.finalWeight)} readOnly /></label>
-              <label className="field field-muted weight-field weight-field-net">Net Weight<input value={fmtWeight(activeSlip?.netWeight)} readOnly /></label>
-              <label className="field field-muted">First weight date/time<input value={activeSlip?.firstWeighedAt ? fmtDate(activeSlip.firstWeighedAt) : pendingFirstWeight ? fmtDate(pendingFirstWeight.capturedAt) : "-"} readOnly /></label>
-              <label className="field field-muted">Second weight date/time<input value={activeSlip?.finalWeighedAt ? fmtDate(activeSlip.finalWeighedAt) : "-"} readOnly /></label>
             </div>
-            <input type="hidden" name="mode" value="MULTIPLE" />
-            <div className="slip-action-strip">
-              <button className="btn-primary" disabled={isCreating || Boolean(activeSlip) || !can(data.user, "CREATE_TRANSACTION")}>{isCreating ? "Saving..." : "Save"}</button>
-              <button className="btn-primary" type="button" onClick={captureWeight} disabled={!liveWeight.stable || Boolean(activeSlip && ((weighmentType === "FIRST" && activeSlip.firstWeight != null) || (weighmentType === "SECOND" && (activeSlip.firstWeight == null || activeSlip.productEntries.length === 0 || activeSlip.status === "COMPLETED"))))}>
-                Capture Weight
-              </button>
+          </article>
+
+          <article className="wb-card party-card">
+            <h2><span className="section-glyph">CA</span> Vehicle & Party Information</h2>
+            <div className="wb-field-grid">
+              <label className="field quick-add-field">Vehicle No<span className="quick-add-control"><select name="vehicleId" value={selectedVehicleId} onChange={(event) => setDraftSelection((current) => ({ ...current, vehicleId: event.target.value }))} disabled={lockLoadedSlipDetails} required><option value="">Select vehicle</option>{data.vehicles.map((item) => <option key={item.id} value={item.id}>{item.vehicleNo}</option>)}</select><button className="quick-add-button" type="button" onClick={() => setQuickAddKind("vehicle")} disabled={lockLoadedSlipDetails || !can(data.user, "MANAGE_VEHICLES")} title="Quick add vehicle">+</button></span></label>
+              <label className="field quick-add-field">Customer<span className="quick-add-control"><select name="partyId" value={selectedPartyId} onChange={(event) => setDraftSelection((current) => ({ ...current, partyId: event.target.value }))} disabled={lockLoadedSlipDetails} required><option value="">Select customer</option>{data.parties.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><button className="quick-add-button" type="button" onClick={() => setQuickAddKind("party")} disabled={lockLoadedSlipDetails || !can(data.user, "MANAGE_PARTIES")} title="Quick add customer">+</button></span></label>
+              <label className="field">Transporter<input name="transporter" defaultValue={activeSlip?.transporter || ""} disabled={lockLoadedSlipDetails} /></label>
+              <label className="field quick-add-field">Driver Name<span className="quick-add-control"><select name="driverId" value={selectedDriverId} onChange={(event) => setDraftSelection((current) => ({ ...current, driverId: event.target.value }))} disabled={lockLoadedSlipDetails} required><option value="">Select driver</option>{data.drivers.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><button className="quick-add-button" type="button" onClick={() => setQuickAddKind("driver")} disabled={lockLoadedSlipDetails || !can(data.user, "MANAGE_DRIVERS")} title="Quick add driver">+</button></span></label>
+              <label className="field">Driver ID<input name="driverIdentity" defaultValue={activeSlip?.driverIdentity || ""} disabled={lockLoadedSlipDetails} /></label>
+              <label className="field">Destination<input name="destination" defaultValue={activeSlip?.destination || ""} disabled={lockLoadedSlipDetails} /></label>
+            </div>
+          </article>
+        </section>
+
+        <section className="weighbridge-column weight-column">
+          <article className="wb-card digital-card">
+            <h2>Weight & Materials</h2>
+            <LiveWeight reading={{ ...liveWeight, weight: shownWeight }} compact />
+            <div className="weight-tools">
+              <button className="btn-primary" type="button" onClick={captureWeight} disabled={!liveWeight.stable || isCompletedSlip}>Capture Weight</button>
               <button className="btn-secondary" type="button" onClick={() => {
                 if (livePaused) {
                   setLivePaused(false);
@@ -574,35 +861,52 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
                   setLivePaused(true);
                 }
               }}>{livePaused ? "Resume Live Reading" : "Pause Live Reading"}</button>
-              <div className="action-live-indicator">
-                <LiveWeight reading={{ ...liveWeight, weight: shownWeight }} compact />
-              </div>
               {data.settings?.slipManualCameraCaptureEnabled && (
-                <button className="btn-secondary" type="button" onClick={captureCamera} disabled={!activeSlip}>Camera Capture</button>
+                <button className="btn-secondary" type="button" onClick={captureCamera} disabled={!activeSlip || isCompletedSlip}>Camera Capture</button>
               )}
             </div>
-            {createError && <p className="slip-action-error">{createError}</p>}
-          </form>
+            <p className={`captured-weight-note ${capturedWeight ? "is-captured" : ""}`}>{capturedWeight ? `Captured: ${fmtIndicatorWeight(capturedWeight.weight)} at ${fmtDate(capturedWeight.capturedAt)}` : "No weight captured for the next action"}</p>
+          </article>
 
-          <section className="product-line-editor">
-            <div className="form-section-head">
-              <h3 className="section-title mb-0">Material / Product Lines</h3>
-              <button className="btn-secondary min-h-8 px-3 py-1 text-sm" type="button" onClick={captureProduct} disabled={!productDraft.productId || !activeSlip || activeSlip.firstWeight == null || activeSlip.status === "COMPLETED" || !can(data.user, "CAPTURE_PRODUCT_WEIGHT")}>Add Product Line</button>
+          <article className="wb-card weight-row-card">
+            <label className="field field-muted">1st Weight<input value={fmtWeight(activeSlip?.firstWeight ?? pendingFirstWeight?.weight)} readOnly /></label>
+            <label className="field field-muted">1st Weight Date<input value={activeSlip?.firstWeighedAt ? fmtDate(activeSlip.firstWeighedAt) : pendingFirstWeight ? fmtDate(pendingFirstWeight.capturedAt) : "-"} readOnly /></label>
+          </article>
+          <article className="wb-card weight-row-card">
+            <label className="field field-muted">2nd Weight<input value={fmtWeight(activeSlip?.finalWeight)} readOnly /></label>
+            <label className="field field-muted">2nd Weight Date<input value={activeSlip?.finalWeighedAt ? fmtDate(activeSlip.finalWeighedAt) : "-"} readOnly /></label>
+          </article>
+          <article className="wb-card weight-row-card">
+            <label className="field field-muted weight-field-net">Net Weight<input value={fmtWeight(activeSlip?.netWeight)} readOnly /></label>
+            <div className="weight-row-spacer" aria-hidden="true" />
+          </article>
+
+          <article className="wb-card material-card">
+            <div className="wb-card-head">
+              <h2>Material/Product</h2>
+              <button className="btn-secondary" type="button" onClick={captureProduct} disabled={lockProductEntry || !can(data.user, "CAPTURE_PRODUCT_WEIGHT")}>Add Product Line</button>
             </div>
-            <div className="weighment-form product-line-form">
+            <div className="product-line-form">
               <label className="field">Material/Product<select value={productDraft.productId} onChange={(event) => {
                 const product = data.products.find((item) => item.id === event.target.value);
                 setProductDraft((current) => ({ ...current, productId: event.target.value, unit: product?.unit || "" }));
-              }}><option value="">Select product</option>{data.products.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-              <label className="field">Packing Mode<input value={productDraft.packingMode} onChange={(event) => setProductDraft((current) => ({ ...current, packingMode: event.target.value }))} /></label>
-              <label className="field">Total Packages<input type="number" value={productDraft.packageCount} onChange={(event) => setProductDraft((current) => ({ ...current, packageCount: Number(event.target.value) }))} /></label>
-              <label className="field">Unit<input value={productDraft.unit || selectedProduct?.unit || "kg"} onChange={(event) => setProductDraft((current) => ({ ...current, unit: event.target.value }))} /></label>
-              <label className="field">Tare Weight<input type="number" value={productDraft.tareWeight} onChange={(event) => setProductDraft((current) => ({ ...current, tareWeight: Number(event.target.value) }))} /></label>
-              <label className="field">Packing Tare<input type="number" value={productDraft.packingTare} onChange={(event) => setProductDraft((current) => ({ ...current, packingTare: Number(event.target.value) }))} /></label>
+              }} disabled={lockProductEntry}><option value="">Select product</option>{data.products.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+              <label className="field">Pkgs<input type="number" value={productDraft.packageCount} onChange={(event) => setProductDraft((current) => ({ ...current, packageCount: Number(event.target.value) }))} disabled={lockProductEntry} /></label>
+              <label className="field">Unit<input value={productDraft.unit || selectedProduct?.unit || "kg"} onChange={(event) => setProductDraft((current) => ({ ...current, unit: event.target.value }))} disabled={lockProductEntry} /></label>
+              <label className="field">Tare<input type="number" value={productDraft.tareWeight} onChange={(event) => setProductDraft((current) => ({ ...current, tareWeight: Number(event.target.value) }))} disabled={lockProductEntry} /></label>
+              <label className="field">Packing Tare<input type="number" value={productDraft.packingTare} onChange={(event) => setProductDraft((current) => ({ ...current, packingTare: Number(event.target.value) }))} disabled={lockProductEntry} /></label>
             </div>
             <div className="compact-table-wrap">
               <table className="mini-table">
-                <thead><tr><th>#</th><th>Product</th><th>Pkgs</th><th>Gross/Intermediate</th><th>Product Weight</th><th>Unit</th></tr></thead>
+                <colgroup>
+                  <col className="col-seq" />
+                  <col className="col-product" />
+                  <col className="col-pkgs" />
+                  <col className="col-gross" />
+                  <col className="col-product-weight" />
+                  <col className="col-unit" />
+                </colgroup>
+                <thead><tr><th>#</th><th>Product</th><th>Pkgs</th><th>Gross/Inter.</th><th>Product Wt.</th><th>Unit</th></tr></thead>
                 <tbody>
                   {(activeSlip?.productEntries || []).map((entry) => (
                     <tr key={entry.id}><td>{entry.sequence}</td><td>{entry.productName}</td><td>{entry.packageCount}</td><td>{fmtWeight(entry.grossWeight)}</td><td>{fmtWeight(entry.productWeight)}</td><td>{entry.unit}</td></tr>
@@ -611,17 +915,54 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
                 </tbody>
               </table>
             </div>
-          </section>
+          </article>
+          {createError && (
+            <div className="slip-action-error" role="alert">
+              <span>{createError}</span>
+              <button type="button" onClick={() => setCreateError("")}>Cancel</button>
+            </div>
+          )}
         </section>
 
-        <aside className="slip-live-panel">
-          <section className="panel slip-panel">
-            <h3 className="section-title">Camera Live View</h3>
-            <CameraWall cameras={slipCameras(data.settings)} large />
-          </section>
+        <aside className="wb-card cctv-card">
+          <h2>Live CCTV Monitoring</h2>
+          <CameraWall cameras={slipCameras(data.settings)} large />
         </aside>
-      </div>
+      </form>
     </section>
+    {quickAddKind && <QuickAddModal kind={quickAddKind} saving={quickAddSaving} onClose={() => setQuickAddKind(null)} onSubmit={quickAdd} />}
+    </>
+  );
+}
+
+function QuickAddModal({ kind, saving, onClose, onSubmit }: { kind: QuickAddKind; saving: boolean; onClose: () => void; onSubmit: (kind: QuickAddKind, values: Record<string, string>) => Promise<void> }) {
+  const title = kind === "vehicle" ? "Quick Add Vehicle" : kind === "party" ? "Quick Add Customer" : "Quick Add Driver";
+  const fieldName = kind === "vehicle" ? "vehicleNo" : "name";
+  const fieldLabel = kind === "vehicle" ? "Vehicle No" : kind === "party" ? "Customer Name" : "Driver Name";
+  const placeholder = kind === "vehicle" ? "e.g. KAA123A" : kind === "party" ? "Customer name" : "Driver name";
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    await onSubmit(kind, formObject(form));
+  };
+
+  return (
+    <div className="quick-add-modal-backdrop" onMouseDown={onClose}>
+      <section className="quick-add-modal" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label={title}>
+        <header>
+          <span>Quick Add</span>
+          <h2>{title}</h2>
+        </header>
+        <form onSubmit={submit}>
+          <label className="field">{fieldLabel}<input name={fieldName} placeholder={placeholder} required autoFocus /></label>
+          <div className="quick-add-modal-actions">
+            <button className="btn-secondary" type="button" onClick={onClose} disabled={saving}>Cancel</button>
+            <button className="btn-primary" type="submit" disabled={saving}>{saving ? "Adding..." : "Add and Select"}</button>
+          </div>
+        </form>
+      </section>
+    </div>
   );
 }
 
@@ -686,12 +1027,23 @@ function CapturedCameraStrip({ images }: { images: CameraImage[] }) {
 }
 
 function MasterModule({ title, endpoint, fields, rows, primary, onRefresh, disabled }: { title: string; endpoint: string; fields: string[]; rows: Array<Record<string, string>>; primary: string; onRefresh: () => Promise<void>; disabled: boolean }) {
+  const [message, setMessage] = useState("");
+  const [messageTone, setMessageTone] = useState<"success" | "error">("success");
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = event.currentTarget;
-    await api(endpoint, { method: "POST", body: JSON.stringify(formObject(form)) });
-    form.reset();
-    await onRefresh();
+    setMessage("");
+    setMessageTone("success");
+    try {
+      await api(endpoint, { method: "POST", body: JSON.stringify(formObject(form)) });
+      form.reset();
+      await onRefresh();
+      setMessage("Record created successfully");
+      setMessageTone("success");
+    } catch (err) {
+      setMessage(errorMessage(err, "Could not create record"));
+      setMessageTone("error");
+    }
   };
   return (
     <section className="grid gap-5">
@@ -705,6 +1057,7 @@ function MasterModule({ title, endpoint, fields, rows, primary, onRefresh, disab
           ))}
           <button className="btn-primary self-end" disabled={disabled}>Save</button>
         </form>
+        {message && <p className={`mt-3 text-sm font-medium ${messageTone === "success" ? "text-teal-700" : "text-red-700"}`}>{message}</p>}
       </section>
       <section className="panel overflow-auto">
         <table className="data-table"><tbody>{rows.map((row) => <tr key={row.id}><td><strong>{row[primary]}</strong></td>{fields.filter((field) => field !== primary).map((field) => <td key={field}>{row[field]}</td>)}</tr>)}</tbody></table>
@@ -734,10 +1087,19 @@ function Reports() {
 
 function AuditLogs() {
   const [logs, setLogs] = useState<Array<Record<string, string>>>([]);
-  useEffect(() => { api<Array<Record<string, string>>>("/api/audit-logs").then(setLogs); }, []);
+  const [message, setMessage] = useState("");
+  useEffect(() => {
+    api<Array<Record<string, string>>>("/api/audit-logs")
+      .then((rows) => {
+        setLogs(rows);
+        setMessage("");
+      })
+      .catch((err) => setMessage(errorMessage(err, "Could not load audit logs")));
+  }, []);
   return (
     <section className="grid gap-5">
       <Header eyebrow="Security" title="Audit Logs" />
+      {message && <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-700">{message}</p>}
       <section className="panel overflow-auto">
         <table className="data-table">
           <thead><tr><th>Time</th><th>User</th><th>Action</th><th>Entity</th><th>Details</th></tr></thead>
@@ -750,7 +1112,20 @@ function AuditLogs() {
 
 function Users({ disabled }: { disabled: boolean }) {
   const [users, setUsers] = useState<User[]>([]);
-  useEffect(() => { api<User[]>("/api/users").then(setUsers); }, []);
+  const [message, setMessage] = useState("");
+  const [messageTone, setMessageTone] = useState<"success" | "error">("success");
+  const [creatingUser, setCreatingUser] = useState(false);
+  useEffect(() => {
+    api<User[]>("/api/users")
+      .then((rows) => {
+        setUsers(rows);
+        setMessage("");
+      })
+      .catch((err) => {
+        setMessage(errorMessage(err, "Could not load users"));
+        setMessageTone("error");
+      });
+  }, []);
   return (
     <section className="grid gap-5">
       <Header eyebrow="Access" title="Users and Roles" />
@@ -758,15 +1133,30 @@ function Users({ disabled }: { disabled: boolean }) {
         <form className="grid grid-cols-5 gap-3 max-xl:grid-cols-2 max-sm:grid-cols-1" onSubmit={async (event) => {
           event.preventDefault();
           const form = event.currentTarget;
-          await api("/api/users", { method: "POST", body: JSON.stringify(formObject(form)) });
-          setUsers(await api<User[]>("/api/users"));
-          form.reset();
+          setMessage("");
+          setMessageTone("success");
+          setCreatingUser(true);
+          try {
+            await api("/api/users", { method: "POST", body: JSON.stringify(formObject(form)) });
+            setUsers(await api<User[]>("/api/users"));
+            form.reset();
+            setMessage("User created successfully");
+            setMessageTone("success");
+          } catch (err) {
+            setMessage(errorMessage(err, "Could not create user"));
+            setMessageTone("error");
+          } finally {
+            setCreatingUser(false);
+          }
         }}>
           <label className="field">Name<input name="name" required /></label>
           <label className="field">Username<input name="username" required /></label>
-          <label className="field">Password<input name="password" type="password" required /></label>
+          <label className="field">Password<input name="password" type="password" required autoComplete="new-password" /></label>
           <label className="field">Role<select name="role"><option>ADMIN</option><option>WEIGHBRIDGE_OPERATOR</option><option>ACCOUNTS</option><option>STORE_DISPATCH</option><option>VIEWER</option></select></label>
-          <button className="btn-primary self-end" disabled={disabled}>Create</button>
+          <button className="btn-primary self-end" disabled={disabled || creatingUser}>{creatingUser ? "Creating..." : "Create"}</button>
+          <p className={`col-span-5 min-h-5 text-sm font-medium max-xl:col-span-2 max-sm:col-span-1 ${messageTone === "success" ? "text-teal-700" : "text-red-700"}`}>
+            {message || "Password must include uppercase, lowercase, number, symbol, and at least 8 characters."}
+          </p>
         </form>
       </section>
       <section className="panel overflow-auto">
@@ -807,7 +1197,16 @@ function Settings({ settings, disabled, onRefresh }: { settings: Settings; disab
   const [manualCameraCaptureEnabled, setManualCameraCaptureEnabled] = useState(Boolean(settings.slipManualCameraCaptureEnabled));
   const [weighbridgeNodeVisible, setWeighbridgeNodeVisible] = useState(Boolean(settings.slipWeighbridgeNodeVisible));
   const [shiftVisible, setShiftVisible] = useState(Boolean(settings.slipShiftVisible));
+  const [selectVehicleVisible, setSelectVehicleVisible] = useState(Boolean(settings.slipSelectVehicleVisible));
+  const [searchControlsVisible, setSearchControlsVisible] = useState(Boolean(settings.slipSearchControlsVisible));
+  const [collapsedSettingsSections, setCollapsedSettingsSections] = useState({
+    slipEntry: true,
+    weighbridge: true,
+    cameras: true
+  });
   const [message, setMessage] = useState("");
+  const [messageTone, setMessageTone] = useState<"success" | "error">("success");
+  const [savingSettings, setSavingSettings] = useState(false);
 
   useEffect(() => {
     setWeighbridges(settingsWeighbridges(settings));
@@ -815,6 +1214,8 @@ function Settings({ settings, disabled, onRefresh }: { settings: Settings; disab
     setManualCameraCaptureEnabled(Boolean(settings.slipManualCameraCaptureEnabled));
     setWeighbridgeNodeVisible(Boolean(settings.slipWeighbridgeNodeVisible));
     setShiftVisible(Boolean(settings.slipShiftVisible));
+    setSelectVehicleVisible(Boolean(settings.slipSelectVehicleVisible));
+    setSearchControlsVisible(Boolean(settings.slipSearchControlsVisible));
   }, [settings]);
 
   const updateWeighbridge = (id: string, changes: Partial<WeighbridgeSetting>) => {
@@ -903,25 +1304,48 @@ function Settings({ settings, disabled, onRefresh }: { settings: Settings; disab
     setExpandedCameraIds((current) => current.includes(id) ? current.filter((cameraId) => cameraId !== id) : [...current, id]);
   };
 
+  const toggleSettingsSection = (section: keyof typeof collapsedSettingsSections) => {
+    setCollapsedSettingsSections((current) => ({ ...current, [section]: !current[section] }));
+  };
+
   const save = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = event.currentTarget;
     setMessage("");
+    setMessageTone("success");
     const orderedWeighbridges = weighbridges.map((weighbridge, index) => ({ ...weighbridge, displayOrder: index + 1 }));
     const orderedCameras = cameras.map((camera, index) => ({ ...camera, displayOrder: index + 1 }));
-    await api("/api/settings", {
-      method: "PATCH",
-      body: JSON.stringify({
-        ...formObject(form),
-        slipManualCameraCaptureEnabled: manualCameraCaptureEnabled,
-        slipWeighbridgeNodeVisible: weighbridgeNodeVisible,
-        slipShiftVisible: shiftVisible,
-        weighbridges: orderedWeighbridges,
-        cameras: orderedCameras
-      })
-    });
-    setMessage("Settings saved");
-    await onRefresh();
+    setSavingSettings(true);
+    try {
+      await api("/api/settings", {
+        method: "PATCH",
+        body: JSON.stringify({
+          ...formObject(form),
+          slipManualCameraCaptureEnabled: manualCameraCaptureEnabled,
+          slipWeighbridgeNodeVisible: weighbridgeNodeVisible,
+          slipShiftVisible: shiftVisible,
+          slipSelectVehicleVisible: selectVehicleVisible,
+          slipSearchControlsVisible: searchControlsVisible,
+          weighbridges: orderedWeighbridges,
+          cameras: orderedCameras
+        })
+      });
+      setMessage("Settings saved");
+      setMessageTone("success");
+      await onRefresh();
+      setCollapsedSettingsSections({
+        slipEntry: true,
+        weighbridge: true,
+        cameras: true
+      });
+      setExpandedWeighbridgeIds([]);
+      setExpandedCameraIds([]);
+    } catch (error) {
+      setMessage(errorMessage(error, "Could not save settings"));
+      setMessageTone("error");
+    } finally {
+      setSavingSettings(false);
+    }
   };
 
   return (
@@ -938,44 +1362,78 @@ function Settings({ settings, disabled, onRefresh }: { settings: Settings; disab
             </div>
           </div>
 
-          <div>
-            <h3 className="section-title">Slip Entry Options</h3>
-            <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
-              <input
-                type="checkbox"
-                checked={manualCameraCaptureEnabled}
-                onChange={(event) => setManualCameraCaptureEnabled(event.target.checked)}
-              />
-              Show manual Camera Capture button on Slip Entry
-            </label>
-            <label className="mt-2 inline-flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
-              <input
-                type="checkbox"
-                checked={weighbridgeNodeVisible}
-                onChange={(event) => setWeighbridgeNodeVisible(event.target.checked)}
-              />
-              Show current weighbridge node on Slip Entry
-            </label>
-            <label className="mt-2 inline-flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
-              <input
-                type="checkbox"
-                checked={shiftVisible}
-                onChange={(event) => setShiftVisible(event.target.checked)}
-              />
-              Show shift on Slip Entry
-            </label>
+          <div className="settings-section-card">
+            <button className="settings-section-header" type="button" onClick={() => toggleSettingsSection("slipEntry")} aria-expanded={!collapsedSettingsSections.slipEntry}>
+              <span>
+                <h3 className="section-title mb-0">Slip Entry Options</h3>
+                <span className="settings-section-summary">Optional fields and camera controls shown on Slip Entry</span>
+              </span>
+              <span className="settings-section-state">{collapsedSettingsSections.slipEntry ? "Open" : "Close"}</span>
+            </button>
+            {!collapsedSettingsSections.slipEntry && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={manualCameraCaptureEnabled}
+                    onChange={(event) => setManualCameraCaptureEnabled(event.target.checked)}
+                  />
+                  Show manual Camera Capture button on Slip Entry
+                </label>
+                <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={weighbridgeNodeVisible}
+                    onChange={(event) => setWeighbridgeNodeVisible(event.target.checked)}
+                  />
+                  Show current weighbridge node on Slip Entry
+                </label>
+                <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={shiftVisible}
+                    onChange={(event) => setShiftVisible(event.target.checked)}
+                  />
+                  Show shift on Slip Entry
+                </label>
+                <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={selectVehicleVisible}
+                    onChange={(event) => setSelectVehicleVisible(event.target.checked)}
+                  />
+                  Show vehicle number in Select Slip
+                </label>
+                <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={searchControlsVisible}
+                    onChange={(event) => setSearchControlsVisible(event.target.checked)}
+                  />
+                  Show Exit and Search controls on Slip Entry
+                </label>
+              </div>
+            )}
           </div>
 
-          <div>
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <h3 className="section-title mb-0">Weighbridge Display Settings</h3>
-              <div className="flex flex-wrap justify-end gap-2">
-                <button className="btn-secondary min-h-8 px-3 py-1 text-sm" type="button" onClick={() => setExpandedWeighbridgeIds(weighbridges.map((weighbridge) => weighbridge.id))} disabled={weighbridges.length === 0}>Expand All</button>
-                <button className="btn-secondary min-h-8 px-3 py-1 text-sm" type="button" onClick={() => setExpandedWeighbridgeIds([])} disabled={weighbridges.length === 0}>Collapse All</button>
-                <button className="btn-secondary min-h-8 px-3 py-1 text-sm" type="button" onClick={addWeighbridge} disabled={disabled}>Add Weighbridge</button>
-              </div>
+          <div className="settings-section-card">
+            <div className={`flex items-center justify-between gap-3 ${collapsedSettingsSections.weighbridge ? "" : "mb-3"}`}>
+              <button className="settings-section-header flex-1" type="button" onClick={() => toggleSettingsSection("weighbridge")} aria-expanded={!collapsedSettingsSections.weighbridge}>
+                <span>
+                  <h3 className="section-title mb-0">Weighbridge Display Settings</h3>
+                  <span className="settings-section-summary">{weighbridges.length} weighbridge{weighbridges.length === 1 ? "" : "s"} configured</span>
+                </span>
+                <span className="settings-section-state">{collapsedSettingsSections.weighbridge ? "Open" : "Close"}</span>
+              </button>
+              {!collapsedSettingsSections.weighbridge && (
+                <div className="flex flex-wrap justify-end gap-2">
+                  <button className="btn-secondary min-h-8 px-3 py-1 text-sm" type="button" onClick={() => setExpandedWeighbridgeIds(weighbridges.map((weighbridge) => weighbridge.id))} disabled={weighbridges.length === 0}>Expand All</button>
+                  <button className="btn-secondary min-h-8 px-3 py-1 text-sm" type="button" onClick={() => setExpandedWeighbridgeIds([])} disabled={weighbridges.length === 0}>Collapse All</button>
+                  <button className="btn-secondary min-h-8 px-3 py-1 text-sm" type="button" onClick={addWeighbridge} disabled={disabled}>Add Weighbridge</button>
+                </div>
+              )}
             </div>
-            <div className="grid gap-3">
+            {!collapsedSettingsSections.weighbridge && <div className="grid gap-3">
               {weighbridges.map((weighbridge, index) => (
                 <article className="collapsible-setting-card" key={weighbridge.id}>
                   <div className="setting-card-summary">
@@ -1028,19 +1486,27 @@ function Settings({ settings, disabled, onRefresh }: { settings: Settings; disab
                   )}
                 </article>
               ))}
-            </div>
+            </div>}
           </div>
 
-          <div>
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <h3 className="section-title mb-0">Camera Classification and Slip Display</h3>
-              <div className="flex flex-wrap justify-end gap-2">
-                <button className="btn-secondary min-h-8 px-3 py-1 text-sm" type="button" onClick={() => setExpandedCameraIds(cameras.map((camera) => camera.id))} disabled={cameras.length === 0}>Expand All</button>
-                <button className="btn-secondary min-h-8 px-3 py-1 text-sm" type="button" onClick={() => setExpandedCameraIds([])} disabled={cameras.length === 0}>Collapse All</button>
-                <button className="btn-secondary min-h-8 px-3 py-1 text-sm" type="button" onClick={addCamera} disabled={disabled}>Add Camera</button>
-              </div>
+          <div className="settings-section-card">
+            <div className={`flex items-center justify-between gap-3 ${collapsedSettingsSections.cameras ? "" : "mb-3"}`}>
+              <button className="settings-section-header flex-1" type="button" onClick={() => toggleSettingsSection("cameras")} aria-expanded={!collapsedSettingsSections.cameras}>
+                <span>
+                  <h3 className="section-title mb-0">Camera Settings</h3>
+                  <span className="settings-section-summary">{cameras.length} camera{cameras.length === 1 ? "" : "s"} configured for slip display and capture</span>
+                </span>
+                <span className="settings-section-state">{collapsedSettingsSections.cameras ? "Open" : "Close"}</span>
+              </button>
+              {!collapsedSettingsSections.cameras && (
+                <div className="flex flex-wrap justify-end gap-2">
+                  <button className="btn-secondary min-h-8 px-3 py-1 text-sm" type="button" onClick={() => setExpandedCameraIds(cameras.map((camera) => camera.id))} disabled={cameras.length === 0}>Expand All</button>
+                  <button className="btn-secondary min-h-8 px-3 py-1 text-sm" type="button" onClick={() => setExpandedCameraIds([])} disabled={cameras.length === 0}>Collapse All</button>
+                  <button className="btn-secondary min-h-8 px-3 py-1 text-sm" type="button" onClick={addCamera} disabled={disabled}>Add Camera</button>
+                </div>
+              )}
             </div>
-            <div className="grid gap-3">
+            {!collapsedSettingsSections.cameras && <div className="grid gap-3">
               {cameras.map((camera, index) => (
                 <article className="camera-setting-card" key={camera.id}>
                   <div className="camera-card-summary">
@@ -1079,12 +1545,12 @@ function Settings({ settings, disabled, onRefresh }: { settings: Settings; disab
                 </article>
               ))}
               {cameras.length === 0 && <p className="rounded-md border border-dashed border-slate-300 p-4 text-sm text-slate-500">No cameras configured. Add a camera to show it on the slip screen.</p>}
-            </div>
+            </div>}
           </div>
 
           <div className="flex items-center gap-3">
-            <button className="btn-primary" disabled={disabled}>Save Settings</button>
-            {message && <span className="text-sm font-medium text-teal-700">{message}</span>}
+            <button className="btn-primary" type="submit" disabled={disabled || savingSettings}>{savingSettings ? "Saving..." : "Save Settings"}</button>
+            {message && <span className={`text-sm font-medium ${messageTone === "success" ? "text-teal-700" : "text-red-700"}`}>{message}</span>}
           </div>
         </form>
       </section>
@@ -1105,9 +1571,13 @@ function SlipModal({ transaction, settings, onClose, onToast }: { transaction: T
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
   const reprint = async () => {
-    await api(`/api/transactions/${transaction.id}/reprint`, { method: "POST" });
-    window.print();
-    onToast("Reprint logged");
+    try {
+      await api(`/api/transactions/${transaction.id}/reprint`, { method: "POST" });
+      window.print();
+      onToast("Reprint logged");
+    } catch (err) {
+      onToast(errorMessage(err, "Could not reprint slip"));
+    }
   };
   return (
     <div className="fixed inset-0 z-20 grid place-items-center bg-slate-950/60 p-4" onMouseDown={onClose}>
@@ -1191,6 +1661,23 @@ function SlipCameraGroup({ title, images }: { title: string; images: CameraImage
 
 function Header({ eyebrow, title, compact = false }: { eyebrow: string; title: string; compact?: boolean }) {
   return <header><p className="text-xs font-medium uppercase text-teal-700">{eyebrow}</p><h2 className={`${compact ? "text-2xl" : "text-3xl"} font-semibold text-slate-950`}>{title}</h2></header>;
+}
+
+function MenuIcon({ name }: { name: string }) {
+  const icons: Record<string, LucideIcon> = {
+    Dashboard: LayoutDashboard,
+    "Weighbridge Slip": Scale,
+    Vehicles: Truck,
+    Drivers: User,
+    Customers: UsersIcon,
+    Products: Package,
+    Reports: BarChart3,
+    "Audit Logs": History,
+    Users: UsersIcon,
+    Settings: SettingsIcon
+  };
+  const Icon = icons[name] || LayoutDashboard;
+  return <Icon aria-hidden="true" strokeWidth={1.8} />;
 }
 
 function Metric({ label, value }: { label: string; value: string | number }) {

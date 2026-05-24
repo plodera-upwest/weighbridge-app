@@ -1,4 +1,5 @@
 data/*.json
+data/admin-password-reset.txt
 node_modules/
 .next/
 frontend/dist/
@@ -6,3 +7,4 @@ backend/dist/
 device-service/dist/
 *.log
 .env
+*check*.png

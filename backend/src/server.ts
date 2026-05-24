@@ -4,18 +4,87 @@ import express, { NextFunction, Request, Response } from "express";
 import path from "node:path";
 import { captureCameras, renderCameraSvg } from "./camera";
 import { readLiveWeight } from "./device-client";
-import { assertStrongPassword, audit, hashPassword, isRole, nextTransactionNo, readDb, uid, writeDb } from "./repository";
+import { activateLicense, licenseStatus } from "./license";
+import { assertStrongPassword, audit, hashPassword, isRole, needsPasswordRehash, nextTransactionNo, readDb, uid, verifyPassword, writeDb } from "./repository";
 import { hasPermission, publicUser } from "./rbac";
-import { Permission, ProductEntry, Settings, User } from "./types";
+import { Driver, Party, Permission, Product, ProductEntry, Settings, User, Vehicle } from "./types";
 
 const PORT = Number(process.env.PORT || 4175);
 const app = express();
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || `http://127.0.0.1:${PORT},http://localhost:${PORT}`)
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 
-app.use(cors({ origin: true, credentials: true }));
+app.use((_req, res, next) => {
+  res.setHeader("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; base-uri 'self'; frame-ancestors 'none'");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  next();
+});
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+      return;
+    }
+    callback(new Error("Origin not allowed"));
+  },
+  credentials: true
+}));
 app.use(cookieParser());
 app.use(express.json({ limit: "2mb" }));
 
 type AuthedRequest = Request & { user?: User };
+const loginAttempts = new Map<string, { count: number; resetAt: number }>();
+
+function clientIp(req: Request) {
+  return req.ip || req.socket.remoteAddress || "unknown";
+}
+
+function assertLoginAllowed(req: Request) {
+  const key = `${clientIp(req)}:${text(req.body.username).toLowerCase()}`;
+  const now = Date.now();
+  const current = loginAttempts.get(key);
+  if (current && current.resetAt > now && current.count >= 8) {
+    throw new Error("Too many failed login attempts. Try again later.");
+  }
+}
+
+function recordLoginFailure(req: Request) {
+  const key = `${clientIp(req)}:${text(req.body.username).toLowerCase()}`;
+  const now = Date.now();
+  const current = loginAttempts.get(key);
+  if (!current || current.resetAt <= now) {
+    loginAttempts.set(key, { count: 1, resetAt: now + 15 * 60 * 1000 });
+    return;
+  }
+  current.count += 1;
+}
+
+function clearLoginFailures(req: Request) {
+  loginAttempts.delete(`${clientIp(req)}:${text(req.body.username).toLowerCase()}`);
+}
+
+function cookieOptions(maxAge?: number) {
+  return {
+    httpOnly: true,
+    sameSite: "strict" as const,
+    secure: process.env.COOKIE_SECURE === "true",
+    path: "/",
+    ...(maxAge ? { maxAge } : {})
+  };
+}
+
+function settingsFor(user: User, settings: Settings): Settings {
+  if (hasPermission(user, "CHANGE_SETTINGS")) return settings;
+  return {
+    ...settings,
+    cameras: settings.cameras.map((camera) => ({ ...camera, password: "" }))
+  };
+}
 
 function getUser(req: Request) {
   const db = readDb();
@@ -31,19 +100,33 @@ function getUser(req: Request) {
 }
 
 function auth(req: AuthedRequest, res: Response, next: () => void) {
-  const user = getUser(req);
+  const db = readDb();
+  const sessionId = req.cookies.wb_session;
+  if (sessionId && db.sessions[sessionId] && new Date(db.sessions[sessionId].expiresAt).getTime() < Date.now()) {
+    delete db.sessions[sessionId];
+    writeDb(db);
+  }
+  const user = sessionId && db.sessions[sessionId]
+    ? db.users.find((item) => item.id === db.sessions[sessionId].userId && item.active) || null
+    : null;
   if (!user) {
-    res.status(401).json({ error: "Authentication required" });
+    res.status(401).json({ error: "Authentication required", code: "AUTHENTICATION_REQUIRED", status: 401 });
     return;
   }
   req.user = user;
+  const bypassLicense = req.path === "/api/me" || req.path === "/api/auth/logout" || req.path.startsWith("/api/license");
+  const status = licenseStatus(db);
+  if (!bypassLicense && !status.valid) {
+    res.status(402).json({ error: status.message, code: "LICENSE_REQUIRED", status: 402, license: status });
+    return;
+  }
   next();
 }
 
 function permit(permission: Permission) {
   return (req: AuthedRequest, res: Response, next: () => void) => {
     if (!req.user || !hasPermission(req.user, permission)) {
-      res.status(403).json({ error: "Permission denied" });
+      res.status(403).json({ error: "Permission denied", code: "PERMISSION_DENIED", status: 403 });
       return;
     }
     next();
@@ -52,6 +135,10 @@ function permit(permission: Permission) {
 
 function text(value: unknown, fallback = "") {
   return String(value ?? fallback).trim();
+}
+
+function duplicateKey(value: unknown) {
+  return text(value).replace(/\s+/g, " ").toLowerCase();
 }
 
 function weight(value: unknown) {
@@ -129,22 +216,117 @@ function normalizeCameras(input: unknown, existing: Settings["cameras"]) {
   }));
 }
 
-app.post("/api/auth/login", (req, res) => {
-  const db = readDb();
-  const user = db.users.find((item) => item.username === text(req.body.username) && item.passwordHash === hashPassword(String(req.body.password || "")) && item.active);
-  if (!user) {
-    res.status(401).json({ error: "Invalid username or password" });
-    return;
-  }
-  const sessionId = uid("ses");
-  db.sessions[sessionId] = {
-    userId: user.id,
-    expiresAt: new Date(Date.now() + db.settings.sessionTimeoutMinutes * 60 * 1000).toISOString()
+function csvCell(value: unknown) {
+  const raw = String(value ?? "");
+  const safe = /^[=+\-@]/.test(raw) ? `'${raw}` : raw;
+  return `"${safe.replace(/"/g, '""')}"`;
+}
+
+function queryText(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function queryNumber(value: unknown, fallback: number, max = 500) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.min(Math.floor(parsed), max);
+}
+
+function wantsPagedResponse(req: Request) {
+  return [
+    "page",
+    "limit",
+    "status",
+    "partyId",
+    "customerId",
+    "productId",
+    "vehicleId",
+    "driverId",
+    "operatorId",
+    "dateFrom",
+    "dateTo",
+    "search"
+  ].some((key) => req.query[key] !== undefined);
+}
+
+function paginate<T>(items: T[], req: Request, defaultLimit = 100) {
+  const page = queryNumber(req.query.page, 1, 1_000_000);
+  const limit = queryNumber(req.query.limit, defaultLimit);
+  const offset = (page - 1) * limit;
+  return {
+    items: items.slice(offset, offset + limit),
+    total: items.length,
+    page,
+    limit,
+    hasMore: offset + limit < items.length
   };
-  audit(db, { userId: user.id, userName: user.name, action: "LOGIN", entityType: "USER", entityId: user.id, details: "User signed in" });
-  writeDb(db);
-  res.cookie("wb_session", sessionId, { httpOnly: true, sameSite: "lax", maxAge: db.settings.sessionTimeoutMinutes * 60 * 1000 });
-  res.json({ user: publicUser(user), settings: db.settings });
+}
+
+function filteredTransactions(db: ReturnType<typeof readDb>, req: Request) {
+  const status = queryText(req.query.status);
+  const partyId = queryText(req.query.partyId || req.query.customerId);
+  const productId = queryText(req.query.productId);
+  const vehicleId = queryText(req.query.vehicleId);
+  const driverId = queryText(req.query.driverId);
+  const operatorId = queryText(req.query.operatorId);
+  const search = queryText(req.query.search).toLowerCase();
+  const from = queryText(req.query.dateFrom);
+  const to = queryText(req.query.dateTo);
+  const fromTime = from ? new Date(from).getTime() : Number.NEGATIVE_INFINITY;
+  const toTime = to ? new Date(to).getTime() : Number.POSITIVE_INFINITY;
+
+  return db.transactions
+    .filter((transaction) => !status || transaction.status === status)
+    .filter((transaction) => !partyId || transaction.partyId === partyId)
+    .filter((transaction) => !vehicleId || transaction.vehicleId === vehicleId)
+    .filter((transaction) => !driverId || transaction.driverId === driverId)
+    .filter((transaction) => !operatorId || transaction.operatorId === operatorId)
+    .filter((transaction) => !productId || transaction.productEntries.some((entry) => entry.productId === productId))
+    .filter((transaction) => {
+      const created = new Date(transaction.createdAt).getTime();
+      return created >= fromTime && created <= toTime;
+    })
+    .filter((transaction) => {
+      if (!search) return true;
+      return [
+        transaction.transactionNo,
+        transaction.vehicleNo,
+        transaction.driverName,
+        transaction.partyName,
+        transaction.transporter,
+        transaction.destination,
+        transaction.operatorName
+      ].some((value) => String(value || "").toLowerCase().includes(search));
+    });
+}
+
+app.post("/api/auth/login", (req, res, next) => {
+  const db = readDb();
+  try {
+    assertLoginAllowed(req);
+    const password = String(req.body.password || "");
+    const user = db.users.find((item) => item.username === text(req.body.username) && verifyPassword(password, item.passwordHash) && item.active);
+    if (!user) {
+      recordLoginFailure(req);
+      res.status(401).json({ error: "Invalid username or password", code: "INVALID_CREDENTIALS", status: 401 });
+      return;
+    }
+    clearLoginFailures(req);
+    if (needsPasswordRehash(user.passwordHash)) {
+      user.passwordHash = hashPassword(password);
+    }
+    const sessionId = uid("ses");
+    db.sessions[sessionId] = {
+      userId: user.id,
+      expiresAt: new Date(Date.now() + db.settings.sessionTimeoutMinutes * 60 * 1000).toISOString()
+    };
+    audit(db, { userId: user.id, userName: user.name, action: "LOGIN", entityType: "USER", entityId: user.id, details: "User signed in" });
+    writeDb(db);
+    res.cookie("wb_session", sessionId, cookieOptions(db.settings.sessionTimeoutMinutes * 60 * 1000));
+    res.json({ user: publicUser(user), settings: settingsFor(user, db.settings), license: licenseStatus(db) });
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.post("/api/auth/logout", auth, (req: AuthedRequest, res) => {
@@ -153,13 +335,37 @@ app.post("/api/auth/logout", auth, (req: AuthedRequest, res) => {
   if (sessionId) delete db.sessions[sessionId];
   audit(db, { userId: req.user!.id, userName: req.user!.name, action: "LOGOUT", entityType: "USER", entityId: req.user!.id, details: "User signed out" });
   writeDb(db);
-  res.clearCookie("wb_session");
+  res.clearCookie("wb_session", cookieOptions());
   res.json({ ok: true });
 });
 
 app.get("/api/me", auth, (req: AuthedRequest, res) => {
   const db = readDb();
-  res.json({ user: publicUser(req.user!), settings: db.settings });
+  res.json({ user: publicUser(req.user!), settings: settingsFor(req.user!, db.settings), license: licenseStatus(db) });
+});
+
+app.get("/api/license/status", auth, (_req, res) => {
+  const db = readDb();
+  res.json(licenseStatus(db));
+});
+
+app.post("/api/license/activate", auth, permit("CHANGE_SETTINGS"), (req: AuthedRequest, res, next) => {
+  const db = readDb();
+  try {
+    const nextLicense = activateLicense(text(req.body.licenseKey), req.user!.id);
+    const previousLicense = db.license;
+    db.license = nextLicense;
+    const status = licenseStatus(db);
+    if (!status.valid) {
+      db.license = previousLicense;
+      throw new Error(status.message);
+    }
+    audit(db, { userId: req.user!.id, userName: req.user!.name, action: "ACTIVATE_LICENSE", entityType: "LICENSE", entityId: status.licenseId || "license", details: status.customerName || "" });
+    writeDb(db);
+    res.json(status);
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.get("/api/master-data", auth, (_req, res) => {
@@ -236,9 +442,10 @@ app.get("/api/camera-snapshots/:cameraId/:weighmentType/:capturedAt.svg", auth, 
   }));
 });
 
-app.get("/api/transactions", auth, (_req, res) => {
+app.get("/api/transactions", auth, (req, res) => {
   const db = readDb();
-  res.json(db.transactions);
+  const transactions = filteredTransactions(db, req);
+  res.json(wantsPagedResponse(req) ? paginate(transactions, req, 100) : transactions);
 });
 
 app.get("/api/transactions/next-slip-no", auth, (_req, res) => {
@@ -306,7 +513,9 @@ app.post("/api/transactions/:id/first-weigh", auth, permit("CAPTURE_FIRST_WEIGHT
     transaction.firstWeight = weight(req.body.weight);
     transaction.firstWeighedAt = new Date().toISOString();
     transaction.status = "IN_PROGRESS";
-    transaction.cameraImages.push(...await captureCameras(db.settings, "FIRST"));
+    if (!bool(req.body.skipCameraCapture, false)) {
+      transaction.cameraImages.push(...await captureCameras(db.settings, "FIRST"));
+    }
     transaction.updatedAt = new Date().toISOString();
     audit(db, { userId: req.user!.id, userName: req.user!.name, action: "FIRST_WEIGH", entityType: "TRANSACTION", entityId: transaction.id, details: String(transaction.firstWeight) });
     writeDb(db);
@@ -368,7 +577,9 @@ app.post("/api/transactions/:id/final-weigh", auth, permit("CAPTURE_FINAL_WEIGHT
     transaction.netWeight = Math.abs(transaction.finalWeight - transaction.firstWeight);
     transaction.finalWeighedAt = new Date().toISOString();
     transaction.status = "COMPLETED";
-    transaction.cameraImages.push(...await captureCameras(db.settings, "FINAL"));
+    if (!bool(req.body.skipCameraCapture, false)) {
+      transaction.cameraImages.push(...await captureCameras(db.settings, "FINAL"));
+    }
     transaction.updatedAt = new Date().toISOString();
     audit(db, { userId: req.user!.id, userName: req.user!.name, action: "FINAL_WEIGH", entityType: "TRANSACTION", entityId: transaction.id, details: `Net: ${transaction.netWeight}` });
     writeDb(db);
@@ -404,21 +615,44 @@ app.post("/api/transactions/:id/reprint", auth, permit("REPRINT_SLIP"), (req: Au
   res.json({ ok: true });
 });
 
-function masterRoute<T extends { id: string }>(name: string, collection: "vehicles" | "drivers" | "parties" | "products", permission: Permission, create: (body: Record<string, unknown>) => T) {
+function masterRoute<T extends { id: string }>(
+  name: string,
+  collection: "vehicles" | "drivers" | "parties" | "products",
+  permission: Permission,
+  uniqueLabel: string,
+  uniqueValue: (record: T) => string,
+  create: (body: Record<string, unknown>) => T
+) {
+  app.get(`/api/${name}`, auth, permit(permission), (req, res) => {
+    const db = readDb();
+    const search = queryText(req.query.search).toLowerCase();
+    const rows = (db[collection] as unknown as Array<Record<string, unknown>>).filter((row) => {
+      if (!search) return true;
+      return Object.values(row).some((value) => String(value || "").toLowerCase().includes(search));
+    });
+    res.json(req.query.page || req.query.limit || req.query.search ? paginate(rows, req, 100) : rows);
+  });
+
   app.post(`/api/${name}`, auth, permit(permission), (req: AuthedRequest, res) => {
     const db = readDb();
     const record = create(req.body);
-    (db[collection] as unknown as T[]).push(record);
+    const key = duplicateKey(uniqueValue(record));
+    if (!key) throw new Error(`${uniqueLabel} is required`);
+    const rows = db[collection] as unknown as T[];
+    if (rows.some((item) => duplicateKey(uniqueValue(item)) === key)) {
+      throw new Error(`${uniqueLabel} already exists`);
+    }
+    rows.push(record);
     audit(db, { userId: req.user!.id, userName: req.user!.name, action: `CREATE_${collection.toUpperCase()}`, entityType: collection.toUpperCase(), entityId: record.id, details: JSON.stringify(record) });
     writeDb(db);
     res.status(201).json(record);
   });
 }
 
-masterRoute("vehicles", "vehicles", "MANAGE_VEHICLES", (body) => ({ id: uid("veh"), vehicleNo: text(body.vehicleNo).toUpperCase(), transporter: text(body.transporter) }));
-masterRoute("drivers", "drivers", "MANAGE_DRIVERS", (body) => ({ id: uid("drv"), name: text(body.name), phone: text(body.phone) }));
-masterRoute("parties", "parties", "MANAGE_PARTIES", (body) => ({ id: uid("par"), name: text(body.name), type: text(body.type) === "SUPPLIER" ? "SUPPLIER" : "CUSTOMER", phone: text(body.phone) }));
-masterRoute("products", "products", "MANAGE_PRODUCTS", (body) => ({ id: uid("prd"), name: text(body.name), unit: text(body.unit, "kg") }));
+masterRoute<Vehicle>("vehicles", "vehicles", "MANAGE_VEHICLES", "Vehicle number", (record) => record.vehicleNo, (body) => ({ id: uid("veh"), vehicleNo: text(body.vehicleNo).toUpperCase(), transporter: text(body.transporter) }));
+masterRoute<Driver>("drivers", "drivers", "MANAGE_DRIVERS", "Driver name", (record) => record.name, (body) => ({ id: uid("drv"), name: text(body.name), phone: text(body.phone) }));
+masterRoute<Party>("parties", "parties", "MANAGE_PARTIES", "Customer/supplier name", (record) => record.name, (body) => ({ id: uid("par"), name: text(body.name), type: text(body.type) === "SUPPLIER" ? "SUPPLIER" : "CUSTOMER", phone: text(body.phone) }));
+masterRoute<Product>("products", "products", "MANAGE_PRODUCTS", "Product name", (record) => record.name, (body) => ({ id: uid("prd"), name: text(body.name), unit: text(body.unit, "kg") }));
 
 app.get("/api/users", auth, permit("MANAGE_USERS"), (_req, res) => {
   const db = readDb();
@@ -429,18 +663,28 @@ app.post("/api/users", auth, permit("MANAGE_USERS"), (req: AuthedRequest, res) =
   const db = readDb();
   const password = String(req.body.password || "");
   assertStrongPassword(password);
+  const name = text(req.body.name);
+  const username = text(req.body.username);
+  if (!name || !username) throw new Error("Name and username are required");
+  if (db.users.some((item) => item.username.toLowerCase() === username.toLowerCase())) {
+    throw new Error("Username already exists");
+  }
   const role = text(req.body.role);
   if (!isRole(role)) throw new Error("Valid role is required");
-  const user = { id: uid("usr"), name: text(req.body.name), username: text(req.body.username), passwordHash: hashPassword(password), role, active: true };
+  const user = { id: uid("usr"), name, username, passwordHash: hashPassword(password), role, active: true };
   db.users.push(user);
   audit(db, { userId: req.user!.id, userName: req.user!.name, action: "CREATE_USER", entityType: "USER", entityId: user.id, details: user.username });
   writeDb(db);
   res.status(201).json(publicUser(user));
 });
 
-app.get("/api/audit-logs", auth, permit("VIEW_AUDIT_LOGS"), (_req, res) => {
+app.get("/api/audit-logs", auth, permit("VIEW_AUDIT_LOGS"), (req, res) => {
   const db = readDb();
-  res.json(db.auditLogs.slice(0, 250));
+  const logs = db.auditLogs
+    .filter((log) => !queryText(req.query.action) || log.action === queryText(req.query.action))
+    .filter((log) => !queryText(req.query.userId) || log.userId === queryText(req.query.userId))
+    .filter((log) => !queryText(req.query.entityType) || log.entityType === queryText(req.query.entityType));
+  res.json(req.query.page || req.query.limit || req.query.action || req.query.userId || req.query.entityType ? paginate(logs, req, 100) : logs.slice(0, 250));
 });
 
 app.patch("/api/settings", auth, permit("CHANGE_SETTINGS"), (req: AuthedRequest, res) => {
@@ -451,6 +695,8 @@ app.patch("/api/settings", auth, permit("CHANGE_SETTINGS"), (req: AuthedRequest,
   db.settings.slipManualCameraCaptureEnabled = bool(req.body.slipManualCameraCaptureEnabled, db.settings.slipManualCameraCaptureEnabled);
   db.settings.slipWeighbridgeNodeVisible = bool(req.body.slipWeighbridgeNodeVisible, db.settings.slipWeighbridgeNodeVisible);
   db.settings.slipShiftVisible = bool(req.body.slipShiftVisible, db.settings.slipShiftVisible);
+  db.settings.slipSelectVehicleVisible = bool(req.body.slipSelectVehicleVisible, db.settings.slipSelectVehicleVisible);
+  db.settings.slipSearchControlsVisible = bool(req.body.slipSearchControlsVisible, db.settings.slipSearchControlsVisible);
   db.settings.device = {
     ...db.settings.device,
     connectionType: connectionType(req.body.connectionType ?? db.settings.device.connectionType),
@@ -489,8 +735,8 @@ app.patch("/api/settings", auth, permit("CHANGE_SETTINGS"), (req: AuthedRequest,
 app.get("/api/reports/:type/export", auth, permit("VIEW_REPORTS"), (req, res) => {
   const db = readDb();
   const format = text(req.query.format, "csv");
-  const rows = db.transactions.map((item) => [item.transactionNo, item.createdAt, item.vehicleNo, item.partyName, item.status, item.netWeight ?? ""]);
-  const csv = [["Transaction", "Date", "Vehicle", "Party", "Status", "Net Weight"], ...rows].map((row) => row.join(",")).join("\n");
+  const rows = filteredTransactions(db, req).map((item) => [item.transactionNo, item.createdAt, item.vehicleNo, item.partyName, item.status, item.netWeight ?? ""]);
+  const csv = [["Transaction", "Date", "Vehicle", "Party", "Status", "Net Weight"], ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
   audit(db, { userId: (req as AuthedRequest).user!.id, userName: (req as AuthedRequest).user!.name, action: "EXPORT_REPORT", entityType: "REPORT", entityId: req.params.type, details: format });
   writeDb(db);
   if (format === "csv") {
@@ -504,13 +750,32 @@ app.get("/api/reports/:type/export", auth, permit("VIEW_REPORTS"), (req, res) =>
   res.send(csv);
 });
 
+app.use("/api", (_req, res) => {
+  res.status(404).json({ error: "API endpoint not found", code: "NOT_FOUND", status: 404 });
+});
+
 app.use(express.static(path.join(process.cwd(), "frontend", "dist")));
 app.get("*", (_req, res) => {
   res.sendFile(path.join(process.cwd(), "frontend", "dist", "index.html"));
 });
 
-app.use((error: Error, _req: Request, res: Response, _next: () => void) => {
-  res.status(400).json({ error: error.message });
+app.use((error: Error, req: Request, res: Response, _next: () => void) => {
+  const message = error.message || "Unexpected server error";
+  const lower = message.toLowerCase();
+  const status =
+    lower.includes("authentication required") ? 401 :
+    lower.includes("permission denied") ? 403 :
+    lower.includes("not found") ? 404 :
+    lower.includes("already exists") ? 409 :
+    400;
+  const code =
+    status === 401 ? "AUTHENTICATION_REQUIRED" :
+    status === 403 ? "PERMISSION_DENIED" :
+    status === 404 ? "NOT_FOUND" :
+    status === 409 ? "DUPLICATE_RECORD" :
+    "REQUEST_ERROR";
+  console.error(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl} -> ${status}: ${message}`);
+  res.status(status).json({ error: message, code, status });
 });
 
 app.listen(PORT, "127.0.0.1", () => {
