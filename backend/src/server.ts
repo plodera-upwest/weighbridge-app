@@ -10,6 +10,7 @@ import { hasPermission, publicUser } from "./rbac";
 import { Driver, Party, Permission, Product, ProductEntry, Settings, User, Vehicle } from "./types";
 
 const PORT = Number(process.env.PORT || 4175);
+const HOST = process.env.HOST || "0.0.0.0";
 const app = express();
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || `http://127.0.0.1:${PORT},http://localhost:${PORT}`)
   .split(",")
@@ -778,6 +779,6 @@ app.use((error: Error, req: Request, res: Response, _next: () => void) => {
   res.status(status).json({ error: message, code, status });
 });
 
-app.listen(PORT, "127.0.0.1", () => {
-  console.log(`Weighbridge app running at http://127.0.0.1:${PORT}`);
+app.listen(PORT, HOST, () => {
+  console.log(`Weighbridge app running at http://${HOST}:${PORT}`);
 });
