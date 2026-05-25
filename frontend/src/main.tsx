@@ -487,7 +487,6 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
   const selectableTransactions = data.transactions.filter((item) => item.status !== "CANCELLED");
   const [activeSlipId, setActiveSlipId] = useState("");
   const [nextSlipNo, setNextSlipNo] = useState("Auto-generated");
-  const [weighmentType, setWeighmentType] = useState<"FIRST" | "SECOND">("FIRST");
   const [movementType, setMovementType] = useState<"INBOUND" | "OUTBOUND">("INBOUND");
   const [entryFormKey, setEntryFormKey] = useState(0);
   const [searchTerm, setSearchTerm] = useState("");
@@ -510,6 +509,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
     remarks: ""
   });
   const activeSlip = activeSlipId ? selectableTransactions.find((item) => item.id === activeSlipId) || null : null;
+  const systemWeighmentType: "FIRST" | "SECOND" = !activeSlip || activeSlip.firstWeight == null ? "FIRST" : "SECOND";
   const isCompletedSlip = activeSlip?.status === "COMPLETED";
   const lockLoadedSlipDetails = activeSlip?.status === "IN_PROGRESS" || activeSlip?.status === "COMPLETED";
   const lockProductEntry = !activeSlip || activeSlip.firstWeight == null || isCompletedSlip;
@@ -561,7 +561,6 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
     setPendingFirstWeight(null);
     setCapturedWeight(null);
     setCreateError("");
-    setWeighmentType("FIRST");
     setMovementType("INBOUND");
     setDraftSelection({ vehicleId: "", partyId: "", driverId: "" });
     setProductDraft({
@@ -609,7 +608,6 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
     setCapturedWeight(null);
     setCreateError("");
     setMovementType(transaction.movementType || "INBOUND");
-    setWeighmentType(transaction.status === "COMPLETED" && transaction.finalWeight != null ? "SECOND" : "FIRST");
     onToast(`Continuing slip ${transaction.transactionNo}`);
   };
 
@@ -628,9 +626,9 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
         onToast(message);
         return;
       }
-      if (weighmentType === "FIRST") {
+      if (systemWeighmentType === "FIRST") {
         if (activeSlip.firstWeight != null) {
-          const message = "Add product lines or manually select 2nd Weight to close this slip";
+          const message = "Add product lines before saving 2nd Weight";
           setCreateError(message);
           onToast(message);
           return;
@@ -656,12 +654,6 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
       }
       const saved = await action(`/api/transactions/${activeSlip.id}/final-weigh`, { weight: capturedWeight.weight, skipCameraCapture: true }, "Second weight saved");
       if (saved) setCapturedWeight(null);
-      return;
-    }
-    if (weighmentType === "SECOND") {
-      const message = "Save the first weight before selecting 2nd Weight";
-      setCreateError(message);
-      onToast(message);
       return;
     }
     if (!capturedWeight) {
@@ -769,7 +761,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
       setPendingFirstWeight(nextCaptured);
     }
     if (activeSlip) {
-      const captured = await action(`/api/transactions/${activeSlip.id}/camera-capture`, { weighmentType: weighmentType === "SECOND" ? "FINAL" : "FIRST" }, "Weight and camera captured");
+      const captured = await action(`/api/transactions/${activeSlip.id}/camera-capture`, { weighmentType: systemWeighmentType === "SECOND" ? "FINAL" : "FIRST" }, "Weight and camera captured");
       if (!captured) {
         setCapturedWeight(null);
         if (activeSlip.firstWeight == null) setPendingFirstWeight(null);
@@ -786,7 +778,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
       onToast("Select an open slip first");
       return;
     }
-    await action(`/api/transactions/${activeSlip.id}/camera-capture`, { weighmentType: weighmentType === "SECOND" ? "FINAL" : "FIRST" }, "Camera image captured");
+    await action(`/api/transactions/${activeSlip.id}/camera-capture`, { weighmentType: systemWeighmentType === "SECOND" ? "FINAL" : "FIRST" }, "Camera image captured");
   };
 
   const selectedProduct = data.products.find((item) => item.id === productDraft.productId);
@@ -833,7 +825,6 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
                 setCapturedWeight(null);
                 setCreateError("");
                 setMovementType(selectedSlip?.movementType || "INBOUND");
-                setWeighmentType(selectedSlip?.status === "COMPLETED" && selectedSlip.finalWeight != null ? "SECOND" : "FIRST");
               }}>
                 <option value=""></option>
                 {filteredSlips.map((item) => (
@@ -846,11 +837,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
                 <option value="INBOUND">Inbound</option>
                 <option value="OUTBOUND">Outbound</option>
               </select></label>
-              <label className="field wb-span-2">Weighment Type<select value={weighmentType} onChange={(event) => {
-                setCapturedWeight(null);
-                setPendingFirstWeight(null);
-                setWeighmentType(event.target.value as "FIRST" | "SECOND");
-              }} disabled={isCompletedSlip}><option value="FIRST">1st Weight</option><option value="SECOND">2nd Weight</option></select></label>
+              <label className="field wb-span-2 field-muted">Weighment Type<input value={systemWeighmentType === "FIRST" ? "1st Weight" : "2nd Weight"} readOnly /></label>
               {data.settings?.slipShiftVisible && (
                 <label className="field">Shift<select name="shift" defaultValue={activeSlip?.shift || "Day"} disabled={lockLoadedSlipDetails}><option>Day</option><option>Night</option><option>Morning</option><option>Evening</option></select></label>
               )}
