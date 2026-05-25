@@ -301,6 +301,14 @@ function filteredTransactions(db: ReturnType<typeof readDb>, req: Request) {
     });
 }
 
+function denyHistoricalMutation(_req: Request, res: Response) {
+  res.status(405).json({
+    error: "Saved transaction history cannot be edited or deleted. Use a supervised correction workflow.",
+    code: "HISTORICAL_RECORD_IMMUTABLE",
+    status: 405
+  });
+}
+
 app.post("/api/auth/login", (req, res, next) => {
   const db = readDb();
   try {
@@ -512,6 +520,9 @@ app.post("/api/transactions/:id/first-weigh", auth, permit("CAPTURE_FIRST_WEIGHT
     const transaction = db.transactions.find((item) => item.id === req.params.id);
     if (!transaction) throw new Error("Transaction not found");
     if (transaction.firstWeight != null) throw new Error("First weight already captured");
+    if (transaction.productEntries.length > 0 || transaction.finalWeight != null || transaction.status === "COMPLETED") {
+      throw new Error("Saved transaction history cannot be edited");
+    }
     transaction.firstWeight = weight(req.body.weight);
     transaction.firstWeighedAt = new Date().toISOString();
     transaction.status = "IN_PROGRESS";
@@ -533,7 +544,7 @@ app.post("/api/transactions/:id/product-weigh", auth, permit("CAPTURE_PRODUCT_WE
   const product = db.products.find((item) => item.id === text(req.body.productId));
   if (!transaction || !product) throw new Error("Transaction and product are required");
   if (transaction.firstWeight == null) throw new Error("Capture first weigh before product weighing");
-  if (transaction.status === "COMPLETED") throw new Error("Completed transactions cannot be changed");
+  if (transaction.status !== "IN_PROGRESS" || transaction.finalWeight != null) throw new Error("Saved transaction history cannot be edited");
 
   const grossWeight = weight(req.body.weight);
   const previousWeight = transaction.productEntries.at(-1)?.grossWeight ?? transaction.firstWeight;
@@ -574,6 +585,7 @@ app.post("/api/transactions/:id/final-weigh", auth, permit("CAPTURE_FINAL_WEIGHT
     if (!transaction) throw new Error("Transaction not found");
     if (transaction.firstWeight == null) throw new Error("First weigh is required");
     if (transaction.finalWeight != null || transaction.status === "COMPLETED") throw new Error("Second weight already captured");
+    if (transaction.status !== "IN_PROGRESS") throw new Error("Only in-progress slips can be completed");
     if (transaction.productEntries.length === 0) throw new Error("Add at least one product line before second weigh");
     transaction.finalWeight = weight(req.body.weight);
     transaction.netWeight = Math.abs(transaction.finalWeight - transaction.firstWeight);
@@ -596,7 +608,7 @@ app.post("/api/transactions/:id/camera-capture", auth, permit("CAPTURE_FIRST_WEI
     const db = readDb();
     const transaction = db.transactions.find((item) => item.id === req.params.id);
     if (!transaction) throw new Error("Transaction not found");
-    if (transaction.status === "COMPLETED") throw new Error("Completed transactions cannot be changed");
+    if (transaction.status !== "IN_PROGRESS") throw new Error("Saved transaction history cannot be edited");
     const weighmentType = req.body.weighmentType === "FINAL" ? "FINAL" : "FIRST";
     transaction.cameraImages.push(...await captureCameras(db.settings, weighmentType));
     transaction.updatedAt = new Date().toISOString();
@@ -616,6 +628,10 @@ app.post("/api/transactions/:id/reprint", auth, permit("REPRINT_SLIP"), (req: Au
   writeDb(db);
   res.json({ ok: true });
 });
+
+app.patch("/api/transactions/:id", auth, denyHistoricalMutation);
+app.put("/api/transactions/:id", auth, denyHistoricalMutation);
+app.delete("/api/transactions/:id", auth, denyHistoricalMutation);
 
 function masterRoute<T extends { id: string }>(
   name: string,
