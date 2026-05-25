@@ -523,6 +523,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
   const selectedDriverId = activeSlip?.driverId || draftSelection.driverId;
   const shownMovementType = activeSlip?.movementType || movementType;
   const locationLabel = shownMovementType === "INBOUND" ? "Receiving Location" : "Destination";
+  const displayedNetWeight = activeSlip?.netWeight ?? activeSlip?.firstWeight ?? pendingFirstWeight?.weight;
   const activeWeighbridge = data.settings?.weighbridges.find((item) => item.active) || data.settings?.weighbridges[0];
   const shownWeight = livePaused && pausedWeight != null ? pausedWeight : liveWeight.weight;
   const filteredSlips = selectableTransactions.filter((item) => {
@@ -978,7 +979,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
             <label className="field field-muted">2nd Weight Date<input value={activeSlip?.finalWeighedAt ? fmtDate(activeSlip.finalWeighedAt) : "-"} readOnly /></label>
           </article>
           <article className="wb-card weight-row-card">
-            <label className="field field-muted weight-field-net">Net Weight<input value={fmtWeight(activeSlip?.netWeight)} readOnly /></label>
+            <label className="field field-muted weight-field-net">Net Weight<input value={fmtWeight(displayedNetWeight)} readOnly /></label>
             <div className="weight-row-spacer" aria-hidden="true" />
           </article>
 
