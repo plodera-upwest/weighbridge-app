@@ -66,6 +66,7 @@ export type Transaction = {
   id: string;
   transactionNo: string;
   mode: TransactionMode;
+  movementType?: "INBOUND" | "OUTBOUND";
   status: TransactionStatus;
   vehicleId: string;
   vehicleNo: string;

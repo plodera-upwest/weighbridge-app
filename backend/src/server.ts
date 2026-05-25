@@ -470,6 +470,7 @@ app.post("/api/transactions", auth, permit("CREATE_TRANSACTION"), async (req: Au
       id: uid("txn"),
       transactionNo: nextTransactionNo(db),
       mode: req.body.mode === "MULTIPLE" ? "MULTIPLE" as const : "SINGLE" as const,
+      movementType: req.body.movementType === "OUTBOUND" ? "OUTBOUND" as const : "INBOUND" as const,
       status: "IN_PROGRESS" as const,
       vehicleId: vehicle.id,
       vehicleNo: vehicle.vehicleNo,

@@ -63,6 +63,7 @@ type Transaction = {
   id: string;
   transactionNo: string;
   mode: TransactionMode;
+  movementType?: "INBOUND" | "OUTBOUND";
   status: Status;
   vehicleId: string;
   vehicleNo: string;
@@ -804,7 +805,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
             <div className="wb-field-grid wb-two">
               <label className="field field-muted">Slip No<input value={activeSlip?.transactionNo || nextSlipNo} readOnly /></label>
               <label className="field field-muted">Date Time<input value={activeSlip ? fmtSlipDateTime(activeSlip.createdAt) : fmtSlipDateTime()} readOnly /></label>
-              <label className="field wb-span-2">Select Slip<select value={activeSlip?.id || ""} onChange={(event) => {
+              <label className="field">Select Slip<select value={activeSlip?.id || ""} onChange={(event) => {
                 const selectedSlip = selectableTransactions.find((item) => item.id === event.target.value);
                 setActiveSlipId(event.target.value);
                 setPendingFirstWeight(null);
@@ -818,6 +819,10 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
                     {data.settings?.slipSelectVehicleVisible ? `${item.transactionNo} - ${item.vehicleNo}` : item.transactionNo}
                   </option>
                 ))}
+              </select></label>
+              <label className="field">Movement<select name="movementType" defaultValue={activeSlip?.movementType || "INBOUND"} disabled={lockLoadedSlipDetails}>
+                <option value="INBOUND">Inbound</option>
+                <option value="OUTBOUND">Outbound</option>
               </select></label>
               <label className="field wb-span-2">Weighment Type<select value={weighmentType} onChange={(event) => {
                 setCapturedWeight(null);
