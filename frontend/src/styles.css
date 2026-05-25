@@ -2862,6 +2862,12 @@
     font-weight: 650 !important;
   }
 
+  .slip-app .weighbridge-workspace .is-placeholder-slip input,
+  .weighbridge-workspace .field-muted.is-placeholder-slip input {
+    color: #a8b3c4 !important;
+    font-weight: 400 !important;
+  }
+
   .data-table {
     min-width: 760px;
     border-collapse: separate !important;
