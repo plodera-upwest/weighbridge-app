@@ -451,7 +451,7 @@ app.get("/api/transactions", auth, (req, res) => {
 
 app.get("/api/transactions/next-slip-no", auth, (_req, res) => {
   const db = readDb();
-  res.json({ slipNo: `TXN-${String(db.meta.transactionSequence + 1).padStart(7, "0")}` });
+  res.json({ slipNo: `SN-${String(db.meta.transactionSequence + 1).padStart(7, "0")}` });
 });
 
 app.post("/api/transactions", auth, permit("CREATE_TRANSACTION"), async (req: AuthedRequest, res, next) => {

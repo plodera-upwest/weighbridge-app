@@ -813,7 +813,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
                 setCreateError("");
                 setWeighmentType(selectedSlip?.status === "COMPLETED" && selectedSlip.finalWeight != null ? "SECOND" : "FIRST");
               }}>
-                <option value="">New unsaved slip</option>
+                <option value=""></option>
                 {filteredSlips.map((item) => (
                   <option key={item.id} value={item.id}>
                     {data.settings?.slipSelectVehicleVisible ? `${item.transactionNo} - ${item.vehicleNo}` : item.transactionNo}

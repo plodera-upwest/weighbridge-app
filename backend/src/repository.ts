@@ -347,7 +347,7 @@ export function writeDb(db: Db) {
 
 export function nextTransactionNo(db: Db) {
   db.meta.transactionSequence += 1;
-  return `TXN-${String(db.meta.transactionSequence).padStart(7, "0")}`;
+  return `SN-${String(db.meta.transactionSequence).padStart(7, "0")}`;
 }
 
 export function audit(db: Db, input: Omit<AuditLog, "id" | "createdAt">) {
