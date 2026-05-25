@@ -5,7 +5,7 @@ import path from "node:path";
 import { captureCameras, renderCameraSvg } from "./camera";
 import { readLiveWeight } from "./device-client";
 import { activateLicense, licenseStatus } from "./license";
-import { assertStrongPassword, audit, hashPassword, isRole, needsPasswordRehash, nextTransactionNo, readDb, uid, verifyPassword, writeDb } from "./repository";
+import { assertStrongPassword, audit, hashPassword, isRole, needsPasswordRehash, nextTransactionNo, peekTransactionNo, readDb, uid, verifyPassword, writeDb } from "./repository";
 import { hasPermission, publicUser } from "./rbac";
 import { Driver, Party, Permission, Product, ProductEntry, Settings, User, Vehicle } from "./types";
 
@@ -459,7 +459,43 @@ app.get("/api/transactions", auth, (req, res) => {
 
 app.get("/api/transactions/next-slip-no", auth, (_req, res) => {
   const db = readDb();
-  res.json({ slipNo: `SN-${String(db.meta.transactionSequence + 1).padStart(7, "0")}` });
+  res.json({ slipNo: peekTransactionNo(db), mode: db.settings.slipNumberMode });
+});
+
+app.post("/api/transactions/reserve-slip-no", auth, permit("CREATE_TRANSACTION"), (req: AuthedRequest, res) => {
+  const db = readDb();
+  const existing = db.meta.reservedSlips?.find((item) => item.userId === req.user!.id && item.status === "RESERVED");
+  if (existing) {
+    res.json({ slipNo: existing.transactionNo, mode: "RESERVE", reserved: true });
+    return;
+  }
+  const transactionNo = nextTransactionNo(db);
+  const now = new Date().toISOString();
+  db.meta.reservedSlips = db.meta.reservedSlips || [];
+  db.meta.reservedSlips.unshift({
+    transactionNo,
+    userId: req.user!.id,
+    userName: req.user!.name,
+    status: "RESERVED",
+    createdAt: now,
+    updatedAt: now
+  });
+  audit(db, { userId: req.user!.id, userName: req.user!.name, action: "RESERVE_SLIP_NO", entityType: "TRANSACTION", entityId: transactionNo, details: "Reserved on New Slip" });
+  writeDb(db);
+  res.json({ slipNo: transactionNo, mode: "RESERVE", reserved: true });
+});
+
+app.post("/api/transactions/cancel-reserved-slip", auth, (req: AuthedRequest, res) => {
+  const db = readDb();
+  const transactionNo = text(req.body.transactionNo);
+  const reservation = db.meta.reservedSlips?.find((item) => item.transactionNo === transactionNo && item.status === "RESERVED");
+  if (reservation) {
+    reservation.status = "VOIDED";
+    reservation.updatedAt = new Date().toISOString();
+    audit(db, { userId: req.user!.id, userName: req.user!.name, action: "VOID_RESERVED_SLIP_NO", entityType: "TRANSACTION", entityId: transactionNo, details: "Cancelled before save" });
+    writeDb(db);
+  }
+  res.json({ ok: true });
 });
 
 app.post("/api/transactions", auth, permit("CREATE_TRANSACTION"), async (req: AuthedRequest, res, next) => {
@@ -473,10 +509,16 @@ app.post("/api/transactions", auth, permit("CREATE_TRANSACTION"), async (req: Au
     const weighbridge = db.settings.weighbridges.find((item) => item.id === text(req.body.weighbridgeId)) || db.settings.weighbridges.find((item) => item.active) || db.settings.weighbridges[0];
     const capturedAt = new Date().toISOString();
     const firstWeight = weight(req.body.initialWeight);
+    const reservedSlipNo = text(req.body.reservedSlipNo);
+    const reservation = reservedSlipNo
+      ? db.meta.reservedSlips?.find((item) => item.transactionNo === reservedSlipNo && item.userId === req.user!.id && item.status === "RESERVED")
+      : null;
+    if (reservedSlipNo && !reservation) throw new Error("Reserved slip number is not available");
+    const transactionNo = reservation ? reservation.transactionNo : nextTransactionNo(db);
 
     const transaction = {
       id: uid("txn"),
-      transactionNo: nextTransactionNo(db),
+      transactionNo,
       mode: req.body.mode === "MULTIPLE" ? "MULTIPLE" as const : "SINGLE" as const,
       movementType: req.body.movementType === "OUTBOUND" ? "OUTBOUND" as const : "INBOUND" as const,
       status: "IN_PROGRESS" as const,
@@ -505,6 +547,10 @@ app.post("/api/transactions", auth, permit("CREATE_TRANSACTION"), async (req: Au
       createdAt: capturedAt,
       updatedAt: capturedAt
     };
+    if (reservation) {
+      reservation.status = "USED";
+      reservation.updatedAt = capturedAt;
+    }
     db.transactions.unshift(transaction);
     audit(db, { userId: req.user!.id, userName: req.user!.name, action: "CREATE_TRANSACTION", entityType: "TRANSACTION", entityId: transaction.id, details: `${transaction.transactionNo} | First weight: ${firstWeight}` });
     writeDb(db);
@@ -710,6 +756,7 @@ app.patch("/api/settings", auth, permit("CHANGE_SETTINGS"), (req: AuthedRequest,
   db.settings.companyName = text(req.body.companyName, db.settings.companyName);
   db.settings.siteName = text(req.body.siteName, db.settings.siteName);
   db.settings.logoUrl = text(req.body.logoUrl, db.settings.logoUrl);
+  db.settings.slipNumberMode = req.body.slipNumberMode === "RESERVE" ? "RESERVE" : "PREVIEW";
   db.settings.slipManualCameraCaptureEnabled = bool(req.body.slipManualCameraCaptureEnabled, db.settings.slipManualCameraCaptureEnabled);
   db.settings.slipWeighbridgeNodeVisible = bool(req.body.slipWeighbridgeNodeVisible, db.settings.slipWeighbridgeNodeVisible);
   db.settings.slipShiftVisible = bool(req.body.slipShiftVisible, db.settings.slipShiftVisible);

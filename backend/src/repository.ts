@@ -51,6 +51,7 @@ const settings: Settings = {
   siteName: "Main Yard",
   logoUrl: "",
   sessionTimeoutMinutes: 30,
+  slipNumberMode: "PREVIEW",
   slipManualCameraCaptureEnabled: false,
   slipWeighbridgeNodeVisible: false,
   slipShiftVisible: false,
@@ -95,7 +96,7 @@ const settings: Settings = {
 };
 
 const seedDb: Db = {
-  meta: { transactionSequence: 1000 },
+  meta: { transactionSequence: 1000, reservedSlips: [] },
   sessions: {},
   users: [
     { id: "usr-admin", name: "Admin Operator", username: "admin", passwordHash: hashPassword("Admin123!"), role: "ADMIN", active: true },
@@ -130,6 +131,11 @@ export function readDb(): Db {
   const db = JSON.parse(fs.readFileSync(DB_PATH, "utf8")) as Db;
   let changed = false;
 
+  if (!Array.isArray(db.meta.reservedSlips)) {
+    db.meta.reservedSlips = [];
+    changed = true;
+  }
+
   if (!db.license) {
     db.license = createTrialLicense(db.settings);
     changed = true;
@@ -137,6 +143,11 @@ export function readDb(): Db {
 
   if (typeof db.settings.slipManualCameraCaptureEnabled !== "boolean") {
     db.settings.slipManualCameraCaptureEnabled = false;
+    changed = true;
+  }
+
+  if (db.settings.slipNumberMode !== "RESERVE" && db.settings.slipNumberMode !== "PREVIEW") {
+    db.settings.slipNumberMode = "PREVIEW";
     changed = true;
   }
 
@@ -348,6 +359,10 @@ export function writeDb(db: Db) {
 export function nextTransactionNo(db: Db) {
   db.meta.transactionSequence += 1;
   return `SN-${String(db.meta.transactionSequence).padStart(7, "0")}`;
+}
+
+export function peekTransactionNo(db: Db) {
+  return `SN-${String(db.meta.transactionSequence + 1).padStart(7, "0")}`;
 }
 
 export function audit(db: Db, input: Omit<AuditLog, "id" | "createdAt">) {

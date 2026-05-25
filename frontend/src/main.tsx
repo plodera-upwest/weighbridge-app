@@ -92,6 +92,7 @@ type Settings = {
   companyName: string;
   siteName: string;
   logoUrl: string;
+  slipNumberMode: "PREVIEW" | "RESERVE";
   slipManualCameraCaptureEnabled: boolean;
   slipWeighbridgeNodeVisible: boolean;
   slipShiftVisible: boolean;
@@ -487,6 +488,8 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
   const selectableTransactions = data.transactions.filter((item) => item.status !== "CANCELLED");
   const [activeSlipId, setActiveSlipId] = useState("");
   const [nextSlipNo, setNextSlipNo] = useState("Auto-generated");
+  const [newSlipStarted, setNewSlipStarted] = useState(false);
+  const [reservedSlipNo, setReservedSlipNo] = useState("");
   const [movementType, setMovementType] = useState<"INBOUND" | "OUTBOUND">("INBOUND");
   const [entryFormKey, setEntryFormKey] = useState(0);
   const [searchTerm, setSearchTerm] = useState("");
@@ -510,6 +513,8 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
   });
   const activeSlip = activeSlipId ? selectableTransactions.find((item) => item.id === activeSlipId) || null : null;
   const systemWeighmentType: "FIRST" | "SECOND" = !activeSlip || activeSlip.firstWeight == null ? "FIRST" : "SECOND";
+  const shownSlipNo = activeSlip?.transactionNo || (newSlipStarted ? nextSlipNo : "SN-0000000");
+  const slipNoIsPlaceholder = !activeSlip && !newSlipStarted;
   const isCompletedSlip = activeSlip?.status === "COMPLETED";
   const lockLoadedSlipDetails = activeSlip?.status === "IN_PROGRESS" || activeSlip?.status === "COMPLETED";
   const lockProductEntry = !activeSlip || activeSlip.firstWeight == null || isCompletedSlip;
@@ -533,7 +538,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
   const vehicleCompletedSlips = vehicleSlips.filter((item) => item.status === "COMPLETED").slice(0, 3);
 
   useEffect(() => {
-    api<{ slipNo: string }>("/api/transactions/next-slip-no")
+    api<{ slipNo: string; mode: Settings["slipNumberMode"] }>("/api/transactions/next-slip-no")
       .then((payload) => setNextSlipNo(payload.slipNo))
       .catch((err) => {
         const message = errorMessage(err, "Could not load next slip number");
@@ -556,8 +561,18 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
     }));
   }, [data.products]);
 
-  const resetEntry = () => {
+  const resetEntry = async (voidReserved = true) => {
+    if (voidReserved && reservedSlipNo) {
+      try {
+        await api("/api/transactions/cancel-reserved-slip", { method: "POST", body: JSON.stringify({ transactionNo: reservedSlipNo }) });
+      } catch (err) {
+        onToast(errorMessage(err, "Could not cancel reserved slip number"));
+      }
+    }
     setActiveSlipId("");
+    setNewSlipStarted(false);
+    setReservedSlipNo("");
+    setNextSlipNo("SN-0000000");
     setPendingFirstWeight(null);
     setCapturedWeight(null);
     setCreateError("");
@@ -573,6 +588,26 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
       remarks: ""
     });
     setEntryFormKey((current) => current + 1);
+  };
+
+  const startNewSlip = async () => {
+    await resetEntry(true);
+    setCreateError("");
+    try {
+      if (data.settings?.slipNumberMode === "RESERVE") {
+        const reservation = await api<{ slipNo: string }>("/api/transactions/reserve-slip-no", { method: "POST" });
+        setNextSlipNo(reservation.slipNo);
+        setReservedSlipNo(reservation.slipNo);
+      } else {
+        const preview = await api<{ slipNo: string }>("/api/transactions/next-slip-no");
+        setNextSlipNo(preview.slipNo);
+      }
+      setNewSlipStarted(true);
+    } catch (err) {
+      const message = errorMessage(err, "Could not start new slip");
+      setCreateError(message);
+      onToast(message);
+    }
   };
 
   const quickAdd = async (kind: QuickAddKind, values: Record<string, string>) => {
@@ -604,6 +639,8 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
 
   const continueSlip = (transaction: Transaction) => {
     setActiveSlipId(transaction.id);
+    setNewSlipStarted(false);
+    setReservedSlipNo("");
     setPendingFirstWeight(null);
     setCapturedWeight(null);
     setCreateError("");
@@ -662,6 +699,12 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
       onToast(message);
       return;
     }
+    if (!newSlipStarted) {
+      const message = "Click New Slip before saving a new slip";
+      setCreateError(message);
+      onToast(message);
+      return;
+    }
     const capturedFirstWeight = capturedWeight;
     setPendingFirstWeight(capturedFirstWeight);
     setIsCreating(true);
@@ -670,6 +713,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
         method: "POST",
         body: JSON.stringify({
           ...formObject(form),
+          reservedSlipNo,
           captureInitialWeight: true,
           initialWeight: capturedFirstWeight.weight
         })
@@ -683,7 +727,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
       } catch (err) {
         previewError = errorMessage(err, "Slip saved, but next slip number could not be loaded");
       }
-      resetEntry();
+      await resetEntry(false);
       onToast(previewError || `Slip ${transaction.transactionNo} saved. Select it from Select Slip to continue.`);
       if (previewError) setCreateError(previewError);
     } catch (err) {
@@ -749,6 +793,12 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
       onToast("Completed slips cannot be changed");
       return;
     }
+    if (!activeSlip && !newSlipStarted) {
+      const message = "Click New Slip before capturing weight";
+      setCreateError(message);
+      onToast(message);
+      return;
+    }
     if (!liveWeight.stable) {
       const message = "Wait for stable weight before capturing";
       setCreateError(message);
@@ -801,12 +851,12 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
 
         <section className="weighbridge-column">
           <div className="slip-primary-actions" aria-label="Slip actions">
-            <button className="btn-primary" type="button" onClick={resetEntry}>New Slip</button>
+            <button className="btn-primary" type="button" onClick={startNewSlip}>New Slip</button>
             <button className="btn-secondary" type="button" onClick={() => {
               resetEntry();
               onToast("Entry cleared");
             }}>Cancel</button>
-            <button className="btn-primary" type="submit" disabled={isCreating || isCompletedSlip || (!activeSlip && !can(data.user, "CREATE_TRANSACTION"))}>{isCreating ? "Saving..." : "Save"}</button>
+            <button className="btn-primary" type="submit" disabled={isCreating || isCompletedSlip || (!activeSlip && (!newSlipStarted || !can(data.user, "CREATE_TRANSACTION")))}>{isCreating ? "Saving..." : "Save"}</button>
             <button className="btn-secondary" type="button" onClick={() => activeSlip && onView(activeSlip)} disabled={!activeSlip || activeSlip.status !== "COMPLETED"}>Print Slip</button>
           </div>
 
@@ -816,7 +866,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
               <span className="status-pill">{activeSlip?.status || "NEW"}</span>
             </div>
             <div className="wb-field-grid wb-two">
-              <label className="field field-muted">Slip No<input value={activeSlip?.transactionNo || nextSlipNo} readOnly /></label>
+              <label className={`field field-muted ${slipNoIsPlaceholder ? "is-placeholder-slip" : ""}`}>Slip No<input value={shownSlipNo} readOnly /></label>
               <label className="field field-muted">Date Time<input value={activeSlip ? fmtSlipDateTime(activeSlip.createdAt) : fmtSlipDateTime()} readOnly /></label>
               <label className="field">Select Slip<select value={activeSlip?.id || ""} onChange={(event) => {
                 const selectedSlip = selectableTransactions.find((item) => item.id === event.target.value);
@@ -1246,6 +1296,7 @@ function Settings({ settings, disabled, onRefresh }: { settings: Settings; disab
   const [cameras, setCameras] = useState<CameraSetting[]>(() => [...settings.cameras].sort((left, right) => left.displayOrder - right.displayOrder));
   const [expandedCameraIds, setExpandedCameraIds] = useState<string[]>([]);
   const [manualCameraCaptureEnabled, setManualCameraCaptureEnabled] = useState(Boolean(settings.slipManualCameraCaptureEnabled));
+  const [slipNumberMode, setSlipNumberMode] = useState<Settings["slipNumberMode"]>(settings.slipNumberMode || "PREVIEW");
   const [weighbridgeNodeVisible, setWeighbridgeNodeVisible] = useState(Boolean(settings.slipWeighbridgeNodeVisible));
   const [shiftVisible, setShiftVisible] = useState(Boolean(settings.slipShiftVisible));
   const [selectVehicleVisible, setSelectVehicleVisible] = useState(Boolean(settings.slipSelectVehicleVisible));
@@ -1263,6 +1314,7 @@ function Settings({ settings, disabled, onRefresh }: { settings: Settings; disab
     setWeighbridges(settingsWeighbridges(settings));
     setCameras([...settings.cameras].sort((left, right) => left.displayOrder - right.displayOrder));
     setManualCameraCaptureEnabled(Boolean(settings.slipManualCameraCaptureEnabled));
+    setSlipNumberMode(settings.slipNumberMode || "PREVIEW");
     setWeighbridgeNodeVisible(Boolean(settings.slipWeighbridgeNodeVisible));
     setShiftVisible(Boolean(settings.slipShiftVisible));
     setSelectVehicleVisible(Boolean(settings.slipSelectVehicleVisible));
@@ -1372,6 +1424,7 @@ function Settings({ settings, disabled, onRefresh }: { settings: Settings; disab
         method: "PATCH",
         body: JSON.stringify({
           ...formObject(form),
+          slipNumberMode,
           slipManualCameraCaptureEnabled: manualCameraCaptureEnabled,
           slipWeighbridgeNodeVisible: weighbridgeNodeVisible,
           slipShiftVisible: shiftVisible,
@@ -1423,6 +1476,13 @@ function Settings({ settings, disabled, onRefresh }: { settings: Settings; disab
             </button>
             {!collapsedSettingsSections.slipEntry && (
               <div className="mt-3 flex flex-wrap gap-2">
+                <label className="field min-w-64 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
+                  Slip number mode
+                  <select value={slipNumberMode} onChange={(event) => setSlipNumberMode(event.target.value as Settings["slipNumberMode"])}>
+                    <option value="PREVIEW">Preview only</option>
+                    <option value="RESERVE">Reserve on New Slip</option>
+                  </select>
+                </label>
                 <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
                   <input
                     type="checkbox"

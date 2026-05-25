@@ -110,6 +110,7 @@ export type Settings = {
   siteName: string;
   logoUrl: string;
   sessionTimeoutMinutes: number;
+  slipNumberMode: "PREVIEW" | "RESERVE";
   slipManualCameraCaptureEnabled: boolean;
   slipWeighbridgeNodeVisible: boolean;
   slipShiftVisible: boolean;
@@ -191,7 +192,17 @@ export type LicenseStatus = {
 };
 
 export type Db = {
-  meta: { transactionSequence: number };
+  meta: {
+    transactionSequence: number;
+    reservedSlips?: Array<{
+      transactionNo: string;
+      userId: string;
+      userName: string;
+      status: "RESERVED" | "USED" | "VOIDED";
+      createdAt: string;
+      updatedAt: string;
+    }>;
+  };
   sessions: Record<string, { userId: string; expiresAt: string }>;
   users: User[];
   vehicles: Vehicle[];
