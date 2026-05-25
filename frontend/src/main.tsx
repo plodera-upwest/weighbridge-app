@@ -524,6 +524,13 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
     const text = `${item.transactionNo} ${item.vehicleNo} ${item.partyName}`.toLowerCase();
     return text.includes(searchTerm.toLowerCase());
   });
+  const vehicleSlips = selectedVehicleId
+    ? data.transactions
+      .filter((item) => item.vehicleId === selectedVehicleId && item.status !== "CANCELLED" && item.id !== activeSlip?.id)
+      .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
+    : [];
+  const vehicleOpenSlips = vehicleSlips.filter((item) => item.status !== "COMPLETED");
+  const vehicleCompletedSlips = vehicleSlips.filter((item) => item.status === "COMPLETED").slice(0, 3);
 
   useEffect(() => {
     api<{ slipNo: string }>("/api/transactions/next-slip-no")
@@ -594,6 +601,16 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
     } finally {
       setQuickAddSaving(false);
     }
+  };
+
+  const continueSlip = (transaction: Transaction) => {
+    setActiveSlipId(transaction.id);
+    setPendingFirstWeight(null);
+    setCapturedWeight(null);
+    setCreateError("");
+    setMovementType(transaction.movementType || "INBOUND");
+    setWeighmentType(transaction.status === "COMPLETED" && transaction.finalWeight != null ? "SECOND" : "FIRST");
+    onToast(`Continuing slip ${transaction.transactionNo}`);
   };
 
   const saveSlip = async (event: FormEvent<HTMLFormElement>) => {
@@ -853,6 +870,43 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
               <label className="field">Driver ID<input name="driverIdentity" defaultValue={activeSlip?.driverIdentity || ""} disabled={lockLoadedSlipDetails} /></label>
               <label className="field">{locationLabel}<input name="destination" defaultValue={activeSlip?.destination || ""} disabled={lockLoadedSlipDetails} /></label>
             </div>
+            {!activeSlip && selectedVehicleId && (vehicleOpenSlips.length > 0 || vehicleCompletedSlips.length > 0) && (
+              <div className="vehicle-slip-history">
+                {vehicleOpenSlips.length > 0 && (
+                  <section>
+                    <h3>Open slips for this vehicle</h3>
+                    <div className="vehicle-slip-list">
+                      {vehicleOpenSlips.map((transaction) => (
+                        <article className="vehicle-slip-row is-open" key={transaction.id}>
+                          <div>
+                            <strong>{transaction.transactionNo}</strong>
+                            <span>{transaction.partyName} | {transaction.driverName} | {transaction.movementType === "OUTBOUND" ? "Outbound" : "Inbound"}</span>
+                            <small>{transaction.firstWeight != null ? `1st Weight ${fmtWeight(transaction.firstWeight)}` : "Waiting for 1st weight"} | {fmtDate(transaction.createdAt)}</small>
+                          </div>
+                          <button className="btn-secondary" type="button" onClick={() => continueSlip(transaction)}>Continue Slip</button>
+                        </article>
+                      ))}
+                    </div>
+                  </section>
+                )}
+                {vehicleCompletedSlips.length > 0 && (
+                  <section>
+                    <h3>Recent completed history</h3>
+                    <div className="vehicle-slip-list">
+                      {vehicleCompletedSlips.map((transaction) => (
+                        <article className="vehicle-slip-row" key={transaction.id}>
+                          <div>
+                            <strong>{transaction.transactionNo}</strong>
+                            <span>{transaction.partyName} | {transaction.driverName} | {transaction.movementType === "OUTBOUND" ? "Outbound" : "Inbound"}</span>
+                            <small>Net {fmtWeight(transaction.netWeight)} | {fmtDate(transaction.createdAt)}</small>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  </section>
+                )}
+              </div>
+            )}
           </article>
         </section>
 
