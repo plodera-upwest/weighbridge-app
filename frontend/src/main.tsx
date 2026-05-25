@@ -138,13 +138,45 @@ async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   } catch {
     throw new Error("Network error. Check the server connection and try again.");
   }
-  const payload = await response.json().catch(() => ({}));
+  const contentType = response.headers.get("content-type") || "";
+  const payload = contentType.includes("application/json")
+    ? await response.json().catch(() => ({}))
+    : { error: await response.text().catch(() => "") };
   if (!response.ok) throw new Error(payload.error || `Request failed with status ${response.status}`);
   return payload;
 }
 
 function errorMessage(error: unknown, fallback = "Something went wrong") {
+  if (typeof error === "string" && error.trim()) return error;
   return error instanceof Error && error.message ? error.message : fallback;
+}
+
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { message: string }> {
+  state = { message: "" };
+
+  static getDerivedStateFromError(error: unknown) {
+    return { message: errorMessage(error, "The app screen could not be loaded") };
+  }
+
+  componentDidCatch(error: unknown) {
+    console.error("[UI error]", error);
+  }
+
+  render() {
+    if (this.state.message) {
+      return (
+        <main className="grid min-h-screen place-items-center bg-slate-100 p-6">
+          <section className="max-w-lg rounded-lg border border-red-200 bg-white p-6 shadow-xl">
+            <p className="text-xs font-semibold uppercase text-red-700">Application Error</p>
+            <h1 className="mt-1 text-2xl font-semibold text-slate-950">This screen could not load</h1>
+            <p className="mt-3 text-sm text-slate-600">{this.state.message}</p>
+            <button className="btn-primary mt-5" type="button" onClick={() => window.location.reload()}>Reload App</button>
+          </section>
+        </main>
+      );
+    }
+    return this.props.children;
+  }
 }
 
 function formObject(form: HTMLFormElement) {
@@ -202,6 +234,23 @@ function App() {
     flash(message);
   };
 
+  useEffect(() => {
+    const onWindowError = (event: ErrorEvent) => {
+      console.error("[Browser error]", event.error || event.message);
+      reportError(event.error || event.message, "Unexpected browser error");
+    };
+    const onUnhandledRejection = (event: PromiseRejectionEvent) => {
+      console.error("[Unhandled promise rejection]", event.reason);
+      reportError(event.reason, "Unexpected background error");
+    };
+    window.addEventListener("error", onWindowError);
+    window.addEventListener("unhandledrejection", onUnhandledRejection);
+    return () => {
+      window.removeEventListener("error", onWindowError);
+      window.removeEventListener("unhandledrejection", onUnhandledRejection);
+    };
+  }, []);
+
   const refresh = async () => {
     try {
       const me = await api<{ user: User; settings: Settings; license: LicenseStatus }>("/api/me");
@@ -237,8 +286,8 @@ function App() {
     const poll = async () => {
       try {
         setLiveWeight(await api<typeof liveWeight>("/api/device/live-weight"));
-      } catch {
-        setLiveWeight((current) => ({ ...current, source: "offline", stable: false }));
+      } catch (err) {
+        setLiveWeight((current) => ({ ...current, source: errorMessage(err, "Live weight unavailable"), stable: false }));
       }
     };
     poll();
@@ -1811,4 +1860,8 @@ function SlipLine({ label, value }: { label: string; value: string }) {
   return <div className="flex justify-between gap-4 border-b border-dashed border-slate-300 py-1"><span>{label}</span><strong>{value}</strong></div>;
 }
 
-createRoot(document.getElementById("root")!).render(<App />);
+createRoot(document.getElementById("root")!).render(
+  <ErrorBoundary>
+    <App />
+  </ErrorBoundary>
+);

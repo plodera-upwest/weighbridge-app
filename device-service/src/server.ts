@@ -5,16 +5,22 @@ const PORT = Number(process.env.DEVICE_PORT || 4180);
 const app = express();
 
 app.get("/weight", async (_req, res) => {
-  const mode = process.env.SCALE_MODE || "simulator";
-  if (mode === "tcp") {
-    res.json(await readTcpWeight());
-    return;
+  try {
+    const mode = process.env.SCALE_MODE || "simulator";
+    if (mode === "tcp") {
+      res.json(await readTcpWeight());
+      return;
+    }
+    if (mode === "serial") {
+      res.json(await readSerialWeight());
+      return;
+    }
+    res.json(readSimulatedWeight());
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Device read failed";
+    console.error(`[${new Date().toISOString()}] Device read failed: ${message}`);
+    res.status(502).json({ error: message, code: "DEVICE_READ_FAILED", status: 502 });
   }
-  if (mode === "serial") {
-    res.json(await readSerialWeight());
-    return;
-  }
-  res.json(readSimulatedWeight());
 });
 
 function readSimulatedWeight() {

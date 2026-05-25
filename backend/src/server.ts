@@ -41,6 +41,12 @@ app.use(express.json({ limit: "2mb" }));
 type AuthedRequest = Request & { user?: User };
 const loginAttempts = new Map<string, { count: number; resetAt: number }>();
 
+function asyncRoute(handler: (req: Request, res: Response, next: NextFunction) => Promise<void>) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    handler(req, res, next).catch(next);
+  };
+}
+
 function clientIp(req: Request) {
   return req.ip || req.socket.remoteAddress || "unknown";
 }
@@ -393,10 +399,10 @@ app.get("/api/dashboard", auth, (_req, res) => {
   });
 });
 
-app.get("/api/device/live-weight", auth, async (_req, res) => {
+app.get("/api/device/live-weight", auth, asyncRoute(async (_req, res) => {
   const db = readDb();
   res.json(await readLiveWeight(db.settings));
-});
+}));
 
 app.get("/api/cameras", auth, (_req, res) => {
   const db = readDb();
@@ -824,22 +830,32 @@ app.get("*", (_req, res) => {
   res.sendFile(path.join(process.cwd(), "frontend", "dist", "index.html"));
 });
 
-app.use((error: Error, req: Request, res: Response, _next: () => void) => {
+app.use((error: Error, req: Request, res: Response, next: NextFunction) => {
+  if (res.headersSent) {
+    next(error);
+    return;
+  }
   const message = error.message || "Unexpected server error";
   const lower = message.toLowerCase();
   const status =
     lower.includes("authentication required") ? 401 :
+    lower.includes("too many failed login attempts") ? 429 :
     lower.includes("permission denied") ? 403 :
     lower.includes("not found") ? 404 :
+    lower.includes("saved transaction history cannot be edited") ? 409 :
+    lower.includes("cannot be edited or deleted") ? 409 :
     lower.includes("already exists") ? 409 :
     400;
   const code =
     status === 401 ? "AUTHENTICATION_REQUIRED" :
+    status === 429 ? "TOO_MANY_ATTEMPTS" :
     status === 403 ? "PERMISSION_DENIED" :
     status === 404 ? "NOT_FOUND" :
+    lower.includes("saved transaction history") || lower.includes("cannot be edited or deleted") ? "HISTORICAL_RECORD_IMMUTABLE" :
     status === 409 ? "DUPLICATE_RECORD" :
     "REQUEST_ERROR";
   console.error(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl} -> ${status}: ${message}`);
+  if (process.env.NODE_ENV !== "production" && error.stack) console.error(error.stack);
   res.status(status).json({ error: message, code, status });
 });
 
