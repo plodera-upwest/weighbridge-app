@@ -488,6 +488,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
   const [activeSlipId, setActiveSlipId] = useState("");
   const [nextSlipNo, setNextSlipNo] = useState("Auto-generated");
   const [weighmentType, setWeighmentType] = useState<"FIRST" | "SECOND">("FIRST");
+  const [movementType, setMovementType] = useState<"INBOUND" | "OUTBOUND">("INBOUND");
   const [entryFormKey, setEntryFormKey] = useState(0);
   const [searchTerm, setSearchTerm] = useState("");
   const [livePaused, setLivePaused] = useState(false);
@@ -515,6 +516,8 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
   const selectedVehicleId = activeSlip?.vehicleId || draftSelection.vehicleId;
   const selectedPartyId = activeSlip?.partyId || draftSelection.partyId;
   const selectedDriverId = activeSlip?.driverId || draftSelection.driverId;
+  const shownMovementType = activeSlip?.movementType || movementType;
+  const locationLabel = shownMovementType === "INBOUND" ? "Receiving Location" : "Destination";
   const activeWeighbridge = data.settings?.weighbridges.find((item) => item.active) || data.settings?.weighbridges[0];
   const shownWeight = livePaused && pausedWeight != null ? pausedWeight : liveWeight.weight;
   const filteredSlips = selectableTransactions.filter((item) => {
@@ -552,6 +555,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
     setCapturedWeight(null);
     setCreateError("");
     setWeighmentType("FIRST");
+    setMovementType("INBOUND");
     setDraftSelection({ vehicleId: "", partyId: "", driverId: "" });
     setProductDraft({
       productId: "",
@@ -811,6 +815,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
                 setPendingFirstWeight(null);
                 setCapturedWeight(null);
                 setCreateError("");
+                setMovementType(selectedSlip?.movementType || "INBOUND");
                 setWeighmentType(selectedSlip?.status === "COMPLETED" && selectedSlip.finalWeight != null ? "SECOND" : "FIRST");
               }}>
                 <option value=""></option>
@@ -820,7 +825,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
                   </option>
                 ))}
               </select></label>
-              <label className="field">Movement<select name="movementType" defaultValue={activeSlip?.movementType || "INBOUND"} disabled={lockLoadedSlipDetails}>
+              <label className="field">Movement<select name="movementType" value={shownMovementType} onChange={(event) => setMovementType(event.target.value as "INBOUND" | "OUTBOUND")} disabled={lockLoadedSlipDetails}>
                 <option value="INBOUND">Inbound</option>
                 <option value="OUTBOUND">Outbound</option>
               </select></label>
@@ -846,7 +851,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
               <label className="field">Transporter<input name="transporter" defaultValue={activeSlip?.transporter || ""} disabled={lockLoadedSlipDetails} /></label>
               <label className="field quick-add-field">Driver Name<span className="quick-add-control"><select name="driverId" value={selectedDriverId} onChange={(event) => setDraftSelection((current) => ({ ...current, driverId: event.target.value }))} disabled={lockLoadedSlipDetails} required><option value="">Select driver</option>{data.drivers.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><button className="quick-add-button" type="button" onClick={() => setQuickAddKind("driver")} disabled={lockLoadedSlipDetails || !can(data.user, "MANAGE_DRIVERS")} title="Quick add driver">+</button></span></label>
               <label className="field">Driver ID<input name="driverIdentity" defaultValue={activeSlip?.driverIdentity || ""} disabled={lockLoadedSlipDetails} /></label>
-              <label className="field">Destination<input name="destination" defaultValue={activeSlip?.destination || ""} disabled={lockLoadedSlipDetails} /></label>
+              <label className="field">{locationLabel}<input name="destination" defaultValue={activeSlip?.destination || ""} disabled={lockLoadedSlipDetails} /></label>
             </div>
           </article>
         </section>
