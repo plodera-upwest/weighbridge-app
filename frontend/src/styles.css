@@ -1932,7 +1932,8 @@
 
   .weighbridge-workspace .is-placeholder-slip input {
     color: #94a3b8;
-    font-style: italic;
+    font-style: normal;
+    font-weight: 400;
   }
 
   .party-card {
