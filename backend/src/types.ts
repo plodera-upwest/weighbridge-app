@@ -158,6 +158,39 @@ export type Settings = {
     displayOrder: number;
     active: boolean;
   }>;
+  slipTemplate: SlipTemplate;
+};
+
+export type SlipTemplateElementType =
+  | "TEXT"
+  | "FIELD"
+  | "PRODUCT_TABLE"
+  | "CAMERA_GROUP"
+  | "QR"
+  | "SIGNATURE"
+  | "LINE";
+
+export type SlipTemplateElement = {
+  id: string;
+  type: SlipTemplateElementType;
+  label: string;
+  field?: string;
+  cameraGroup?: "FIRST" | "FINAL";
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  fontSize: number;
+  bold: boolean;
+  align: "left" | "center" | "right";
+  visible: boolean;
+};
+
+export type SlipTemplate = {
+  paperSize: "A4" | "A5" | "THERMAL_80";
+  width: number;
+  height: number;
+  elements: SlipTemplateElement[];
 };
 
 export type LicensePayload = {

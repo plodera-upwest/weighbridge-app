@@ -59,6 +59,28 @@ type CameraSetting = {
   active: boolean;
 };
 type CameraImage = { id: string; cameraId: string; cameraName: string; weighmentType: "FIRST" | "FINAL"; position: CameraPosition; imageUrl: string; capturedAt: string };
+type SlipTemplateElementType = "TEXT" | "FIELD" | "PRODUCT_TABLE" | "CAMERA_GROUP" | "QR" | "SIGNATURE" | "LINE";
+type SlipTemplateElement = {
+  id: string;
+  type: SlipTemplateElementType;
+  label: string;
+  field?: string;
+  cameraGroup?: "FIRST" | "FINAL";
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  fontSize: number;
+  bold: boolean;
+  align: "left" | "center" | "right";
+  visible: boolean;
+};
+type SlipTemplate = {
+  paperSize: "A4" | "A5" | "THERMAL_80";
+  width: number;
+  height: number;
+  elements: SlipTemplateElement[];
+};
 type Transaction = {
   id: string;
   transactionNo: string;
@@ -101,6 +123,7 @@ type Settings = {
   device: Record<string, string | number | boolean>;
   weighbridges: WeighbridgeSetting[];
   cameras: CameraSetting[];
+  slipTemplate: SlipTemplate;
 };
 
 type AppData = {
@@ -126,6 +149,52 @@ const emptyData: AppData = {
   products: [],
   transactions: []
 };
+
+const slipTemplateFields = [
+  { value: "companyName", label: "Company Name" },
+  { value: "siteName", label: "Site Name" },
+  { value: "transactionNo", label: "Slip No." },
+  { value: "createdAt", label: "Date" },
+  { value: "vehicleNo", label: "Vehicle" },
+  { value: "partyName", label: "Customer/Supplier" },
+  { value: "driverName", label: "Driver" },
+  { value: "driverIdentity", label: "Driver ID" },
+  { value: "transporter", label: "Transporter" },
+  { value: "destination", label: "Destination" },
+  { value: "weighbridgeName", label: "Weighbridge" },
+  { value: "firstWeight", label: "1st Weight" },
+  { value: "firstWeighedAt", label: "1st Weight Date" },
+  { value: "finalWeight", label: "2nd Weight" },
+  { value: "finalWeighedAt", label: "2nd Weight Date" },
+  { value: "netWeight", label: "Net Weight" },
+  { value: "operatorName", label: "Operator" }
+];
+
+function defaultSlipTemplate(): SlipTemplate {
+  return {
+    paperSize: "A4",
+    width: 794,
+    height: 1123,
+    elements: [
+      { id: "tpl-company", type: "TEXT", label: "Company Name", field: "companyName", x: 40, y: 28, w: 714, h: 36, fontSize: 22, bold: true, align: "center", visible: true },
+      { id: "tpl-site", type: "TEXT", label: "Site Name", field: "siteName", x: 40, y: 66, w: 714, h: 24, fontSize: 14, bold: false, align: "center", visible: true },
+      { id: "tpl-slip", type: "FIELD", label: "Slip No.", field: "transactionNo", x: 44, y: 112, w: 330, h: 28, fontSize: 13, bold: true, align: "left", visible: true },
+      { id: "tpl-date", type: "FIELD", label: "Date", field: "createdAt", x: 420, y: 112, w: 330, h: 28, fontSize: 13, bold: false, align: "left", visible: true },
+      { id: "tpl-vehicle", type: "FIELD", label: "Vehicle", field: "vehicleNo", x: 44, y: 150, w: 330, h: 28, fontSize: 13, bold: true, align: "left", visible: true },
+      { id: "tpl-party", type: "FIELD", label: "Customer/Supplier", field: "partyName", x: 420, y: 150, w: 330, h: 28, fontSize: 13, bold: false, align: "left", visible: true },
+      { id: "tpl-driver", type: "FIELD", label: "Driver", field: "driverName", x: 44, y: 188, w: 330, h: 28, fontSize: 13, bold: false, align: "left", visible: true },
+      { id: "tpl-transporter", type: "FIELD", label: "Transporter", field: "transporter", x: 420, y: 188, w: 330, h: 28, fontSize: 13, bold: false, align: "left", visible: true },
+      { id: "tpl-first", type: "FIELD", label: "1st Weight", field: "firstWeight", x: 44, y: 240, w: 220, h: 32, fontSize: 14, bold: true, align: "left", visible: true },
+      { id: "tpl-second", type: "FIELD", label: "2nd Weight", field: "finalWeight", x: 286, y: 240, w: 220, h: 32, fontSize: 14, bold: true, align: "left", visible: true },
+      { id: "tpl-net", type: "FIELD", label: "Net Weight", field: "netWeight", x: 528, y: 240, w: 220, h: 32, fontSize: 15, bold: true, align: "left", visible: true },
+      { id: "tpl-products", type: "PRODUCT_TABLE", label: "Products", x: 44, y: 305, w: 706, h: 170, fontSize: 12, bold: false, align: "left", visible: true },
+      { id: "tpl-first-cams", type: "CAMERA_GROUP", label: "1st Weight Camera Captures", cameraGroup: "FIRST", x: 44, y: 500, w: 706, h: 160, fontSize: 11, bold: false, align: "left", visible: true },
+      { id: "tpl-final-cams", type: "CAMERA_GROUP", label: "2nd Weight Camera Captures", cameraGroup: "FINAL", x: 44, y: 682, w: 706, h: 160, fontSize: 11, bold: false, align: "left", visible: true },
+      { id: "tpl-qr", type: "QR", label: "QR Verification", field: "transactionNo", x: 44, y: 880, w: 220, h: 55, fontSize: 12, bold: false, align: "left", visible: true },
+      { id: "tpl-signature", type: "SIGNATURE", label: "Signature", x: 420, y: 884, w: 330, h: 45, fontSize: 12, bold: false, align: "left", visible: true }
+    ]
+  };
+}
 
 async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   let response: Response;
@@ -353,6 +422,7 @@ function App() {
   const utilityMenu = [
     "Audit Logs",
     "Users",
+    "Slip Designer",
     "Settings"
   ];
 
@@ -415,6 +485,7 @@ function App() {
         {active === "Reports" && <Reports />}
         {active === "Audit Logs" && <AuditLogs />}
         {active === "Users" && <Users disabled={!can(data.user, "MANAGE_USERS")} />}
+        {active === "Slip Designer" && <SlipDesigner settings={data.settings} disabled={!can(data.user, "CHANGE_SETTINGS")} onRefresh={refresh} />}
         {active === "Settings" && <Settings settings={data.settings} disabled={!can(data.user, "CHANGE_SETTINGS")} onRefresh={refresh} />}
       </section>
 
@@ -1411,6 +1482,208 @@ function Users({ disabled }: { disabled: boolean }) {
   );
 }
 
+type DesignerDrag = {
+  id: string;
+  mode: "move" | "resize";
+  startX: number;
+  startY: number;
+  original: SlipTemplateElement;
+};
+
+function SlipDesigner({ settings, disabled, onRefresh }: { settings: Settings; disabled: boolean; onRefresh: () => Promise<void> }) {
+  const [template, setTemplate] = useState<SlipTemplate>(settings.slipTemplate || defaultSlipTemplate());
+  const [selectedId, setSelectedId] = useState(template.elements[0]?.id || "");
+  const [drag, setDrag] = useState<DesignerDrag | null>(null);
+  const [message, setMessage] = useState("");
+  const selected = template.elements.find((element) => element.id === selectedId) || null;
+  const sampleTransaction = sampleSlipTransaction(settings);
+
+  useEffect(() => {
+    setTemplate(settings.slipTemplate || defaultSlipTemplate());
+  }, [settings.slipTemplate]);
+
+  useEffect(() => {
+    if (!drag) return;
+    const onMove = (event: PointerEvent) => {
+      const dx = event.clientX - drag.startX;
+      const dy = event.clientY - drag.startY;
+      setTemplate((current) => ({
+        ...current,
+        elements: current.elements.map((element) => {
+          if (element.id !== drag.id) return element;
+          if (drag.mode === "resize") {
+            return {
+              ...element,
+              w: Math.max(40, Math.min(current.width - element.x, drag.original.w + dx)),
+              h: Math.max(18, Math.min(current.height - element.y, drag.original.h + dy))
+            };
+          }
+          return {
+            ...element,
+            x: Math.max(0, Math.min(current.width - element.w, drag.original.x + dx)),
+            y: Math.max(0, Math.min(current.height - element.h, drag.original.y + dy))
+          };
+        })
+      }));
+    };
+    const onUp = () => setDrag(null);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, [drag]);
+
+  const updateTemplate = (updates: Partial<SlipTemplate>) => setTemplate((current) => ({ ...current, ...updates }));
+  const updateSelected = (updates: Partial<SlipTemplateElement>) => {
+    if (!selectedId) return;
+    setTemplate((current) => ({ ...current, elements: current.elements.map((element) => element.id === selectedId ? { ...element, ...updates } : element) }));
+  };
+  const setPaperSize = (paperSize: SlipTemplate["paperSize"]) => {
+    const size = paperSize === "THERMAL_80" ? { width: 302, height: 900 } : paperSize === "A5" ? { width: 559, height: 794 } : { width: 794, height: 1123 };
+    updateTemplate({ paperSize, ...size });
+  };
+  const addElement = (type: SlipTemplateElementType) => {
+    const id = `tpl-${Date.now()}`;
+    const element: SlipTemplateElement = {
+      id,
+      type,
+      label: type === "PRODUCT_TABLE" ? "Products" : type === "CAMERA_GROUP" ? "Camera Captures" : type === "QR" ? "QR Verification" : type === "SIGNATURE" ? "Signature" : "Custom Field",
+      field: type === "TEXT" ? "companyName" : type === "FIELD" ? "transactionNo" : "",
+      cameraGroup: "FIRST",
+      x: 40,
+      y: 40,
+      w: type === "PRODUCT_TABLE" || type === "CAMERA_GROUP" ? 420 : 220,
+      h: type === "PRODUCT_TABLE" ? 150 : type === "CAMERA_GROUP" ? 140 : 36,
+      fontSize: 12,
+      bold: type === "TEXT",
+      align: type === "TEXT" ? "center" : "left",
+      visible: true
+    };
+    setTemplate((current) => ({ ...current, elements: [...current.elements, element] }));
+    setSelectedId(id);
+  };
+  const removeSelected = () => {
+    if (!selectedId) return;
+    setTemplate((current) => ({ ...current, elements: current.elements.filter((element) => element.id !== selectedId) }));
+    setSelectedId("");
+  };
+  const save = async () => {
+    setMessage("");
+    try {
+      await api<Settings>("/api/settings", { method: "PATCH", body: JSON.stringify({ ...settings, slipTemplate: template }) });
+      await onRefresh();
+      setMessage("Slip template saved");
+    } catch (err) {
+      setMessage(errorMessage(err, "Could not save slip template"));
+    }
+  };
+
+  return (
+    <section className="grid gap-5">
+      <Header eyebrow="Print Design" title="Slip Designer" />
+      <div className="designer-shell">
+        <aside className="designer-tools panel">
+          <label className="field">Paper Size
+            <select value={template.paperSize} onChange={(event) => setPaperSize(event.target.value as SlipTemplate["paperSize"])} disabled={disabled}>
+              <option value="A4">A4</option>
+              <option value="A5">A5</option>
+              <option value="THERMAL_80">80mm Thermal</option>
+            </select>
+          </label>
+          <div className="designer-button-grid">
+            <button className="btn-secondary" type="button" onClick={() => addElement("FIELD")} disabled={disabled}>Field</button>
+            <button className="btn-secondary" type="button" onClick={() => addElement("TEXT")} disabled={disabled}>Text</button>
+            <button className="btn-secondary" type="button" onClick={() => addElement("PRODUCT_TABLE")} disabled={disabled}>Products</button>
+            <button className="btn-secondary" type="button" onClick={() => addElement("CAMERA_GROUP")} disabled={disabled}>Camera</button>
+            <button className="btn-secondary" type="button" onClick={() => addElement("QR")} disabled={disabled}>QR</button>
+            <button className="btn-secondary" type="button" onClick={() => addElement("SIGNATURE")} disabled={disabled}>Signature</button>
+          </div>
+
+          {selected && (
+            <div className="designer-properties">
+              <h3>Selected Item</h3>
+              <label className="field">Label<input value={selected.label} onChange={(event) => updateSelected({ label: event.target.value })} disabled={disabled} /></label>
+              {(selected.type === "FIELD" || selected.type === "TEXT" || selected.type === "QR") && (
+                <label className="field">Data Field
+                  <select value={selected.field || ""} onChange={(event) => updateSelected({ field: event.target.value })} disabled={disabled}>
+                    <option value="">None</option>
+                    {slipTemplateFields.map((field) => <option key={field.value} value={field.value}>{field.label}</option>)}
+                  </select>
+                </label>
+              )}
+              {selected.type === "CAMERA_GROUP" && (
+                <label className="field">Camera Group
+                  <select value={selected.cameraGroup || "FIRST"} onChange={(event) => updateSelected({ cameraGroup: event.target.value as "FIRST" | "FINAL" })} disabled={disabled}>
+                    <option value="FIRST">1st Weight</option>
+                    <option value="FINAL">2nd Weight</option>
+                  </select>
+                </label>
+              )}
+              <div className="designer-prop-grid">
+                <label className="field">X<input type="number" value={Math.round(selected.x)} onChange={(event) => updateSelected({ x: Number(event.target.value) })} disabled={disabled} /></label>
+                <label className="field">Y<input type="number" value={Math.round(selected.y)} onChange={(event) => updateSelected({ y: Number(event.target.value) })} disabled={disabled} /></label>
+                <label className="field">W<input type="number" value={Math.round(selected.w)} onChange={(event) => updateSelected({ w: Number(event.target.value) })} disabled={disabled} /></label>
+                <label className="field">H<input type="number" value={Math.round(selected.h)} onChange={(event) => updateSelected({ h: Number(event.target.value) })} disabled={disabled} /></label>
+              </div>
+              <div className="designer-prop-grid">
+                <label className="field">Font<input type="number" value={selected.fontSize} onChange={(event) => updateSelected({ fontSize: Number(event.target.value) })} disabled={disabled} /></label>
+                <label className="field">Align<select value={selected.align} onChange={(event) => updateSelected({ align: event.target.value as SlipTemplateElement["align"] })} disabled={disabled}><option>left</option><option>center</option><option>right</option></select></label>
+              </div>
+              <label className="inline-flex items-center gap-2 text-sm font-medium"><input type="checkbox" checked={selected.bold} onChange={(event) => updateSelected({ bold: event.target.checked })} disabled={disabled} /> Bold text</label>
+              <label className="inline-flex items-center gap-2 text-sm font-medium"><input type="checkbox" checked={selected.visible} onChange={(event) => updateSelected({ visible: event.target.checked })} disabled={disabled} /> Print this item</label>
+              <button className="btn-danger" type="button" onClick={removeSelected} disabled={disabled}>Remove Item</button>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-3">
+            <button className="btn-secondary" type="button" onClick={() => setTemplate(defaultSlipTemplate())} disabled={disabled}>Reset Default</button>
+            <button className="btn-primary" type="button" onClick={save} disabled={disabled}>Save Template</button>
+          </div>
+          {message && <p className="text-sm font-semibold text-teal-700">{message}</p>}
+        </aside>
+
+        <div className="designer-canvas-panel panel">
+          <div className="designer-canvas-toolbar">
+            <strong>Drag items to position them. Use the corner handle to resize.</strong>
+            <span>{template.width} x {template.height}</span>
+          </div>
+          <div className="designer-canvas-wrap">
+            <div className="slip-designer-canvas" style={{ width: template.width, height: template.height }}>
+              {template.elements.map((element) => (
+                <div
+                  key={element.id}
+                  className={`designer-element ${selectedId === element.id ? "is-selected" : ""} ${!element.visible ? "is-hidden" : ""}`}
+                  style={{ left: element.x, top: element.y, width: element.w, height: element.h, fontSize: element.fontSize, fontWeight: element.bold ? 800 : 500, textAlign: element.align }}
+                  onPointerDown={(event) => {
+                    if (disabled) return;
+                    event.preventDefault();
+                    setSelectedId(element.id);
+                    setDrag({ id: element.id, mode: "move", startX: event.clientX, startY: event.clientY, original: element });
+                  }}
+                >
+                  <SlipTemplateElementView element={element} transaction={sampleTransaction} settings={settings} />
+                  <span
+                    className="designer-resize-handle"
+                    onPointerDown={(event) => {
+                      if (disabled) return;
+                      event.stopPropagation();
+                      event.preventDefault();
+                      setSelectedId(element.id);
+                      setDrag({ id: element.id, mode: "resize", startX: event.clientX, startY: event.clientY, original: element });
+                    }}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function settingsWeighbridges(settings: Settings): WeighbridgeSetting[] {
   if (settings.weighbridges?.length) {
     return [...settings.weighbridges].sort((left, right) => left.displayOrder - right.displayOrder);
@@ -1815,8 +2088,6 @@ function Settings({ settings, disabled, onRefresh }: { settings: Settings; disab
 
 function SlipModal({ transaction, settings, onClose, onToast }: { transaction: Transaction; settings: Settings; onClose: () => void; onToast: (message: string) => void }) {
   const cameraOrder = new Map(settings.cameras.map((camera) => [camera.id, camera.displayOrder]));
-  const firstCameraImages = slipWeighmentImages(transaction.cameraImages, "FIRST", cameraOrder);
-  const finalCameraImages = slipWeighmentImages(transaction.cameraImages, "FINAL", cameraOrder);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
@@ -1844,47 +2115,7 @@ function SlipModal({ transaction, settings, onClose, onToast }: { transaction: T
         >
           ×
         </button>
-        <div className="print-area font-mono text-sm">
-          <h2 className="text-center text-xl font-semibold">{settings.companyName}</h2>
-          <p className="text-center">{settings.siteName}</p>
-          <SlipLine label="Slip No." value={transaction.transactionNo} />
-          <SlipLine label="Vehicle" value={transaction.vehicleNo} />
-          <SlipLine label="Driver" value={transaction.driverName} />
-          <SlipLine label="Driver ID" value={transaction.driverIdentity || "-"} />
-          <SlipLine label="Customer/Supplier" value={transaction.partyName} />
-          <SlipLine label="Transporter" value={transaction.transporter || "-"} />
-          <SlipLine label="Destination" value={transaction.destination || "-"} />
-          <SlipLine label="Shift" value={transaction.shift || "-"} />
-          <SlipLine label="Weighbridge" value={transaction.weighbridgeName || "-"} />
-          <SlipLine label="First Weight" value={fmtWeight(transaction.firstWeight)} />
-          <SlipLine label="First Time" value={transaction.firstWeighedAt ? fmtDate(transaction.firstWeighedAt) : "-"} />
-          <SlipLine label="Final Weight" value={fmtWeight(transaction.finalWeight)} />
-          <SlipLine label="Final Time" value={transaction.finalWeighedAt ? fmtDate(transaction.finalWeighedAt) : "-"} />
-          <SlipLine label="Net Weight" value={fmtWeight(transaction.netWeight)} />
-          <SlipLine label="Operator" value={transaction.operatorName} />
-          <SlipLine label="Date" value={fmtDate(transaction.createdAt)} />
-          <div className="my-3">
-            <strong>Products</strong>
-            <table className="mt-2 w-full border-collapse text-xs">
-              <thead><tr><th className="border p-1 text-left">Product</th><th className="border p-1 text-right">Pkgs</th><th className="border p-1 text-right">Gross</th><th className="border p-1 text-right">Net/Product</th><th className="border p-1">Unit</th></tr></thead>
-              <tbody>
-                {transaction.productEntries.map((entry) => (
-                  <tr key={entry.id}>
-                    <td className="border p-1">{entry.productName}</td>
-                    <td className="border p-1 text-right">{entry.packageCount}</td>
-                    <td className="border p-1 text-right">{fmtWeight(entry.grossWeight)}</td>
-                    <td className="border p-1 text-right">{fmtWeight(entry.productWeight)}</td>
-                    <td className="border p-1 text-center">{entry.unit}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <SlipCameraGroup title="1st Weight Camera Captures" images={firstCameraImages} />
-          <SlipCameraGroup title="2nd Weight Camera Captures" images={finalCameraImages} />
-          <p>QR Verification: {transaction.transactionNo}</p>
-          <p className="mt-8">Signature: __________________________</p>
-        </div>
+        <SlipTemplateRenderer template={settings.slipTemplate || defaultSlipTemplate()} transaction={transaction} settings={settings} cameraOrder={cameraOrder} />
         <div className="mt-5 flex justify-end gap-3 print:hidden">
           <button className="btn-secondary" onClick={reprint}>Print / Reprint</button>
           <button className="btn-primary" onClick={onClose}>Close</button>
@@ -1892,6 +2123,179 @@ function SlipModal({ transaction, settings, onClose, onToast }: { transaction: T
       </section>
     </div>
   );
+}
+
+function sampleSlipTransaction(settings: Settings): Transaction {
+  const capturedAt = new Date().toISOString();
+  return {
+    id: "sample-slip",
+    transactionNo: "SN-0001001",
+    mode: "SINGLE",
+    movementType: "INBOUND",
+    status: "COMPLETED",
+    vehicleId: "sample-vehicle",
+    vehicleNo: "KDS878G",
+    driverId: "sample-driver",
+    driverName: "Mason Kings",
+    partyId: "sample-party",
+    partyName: "BONGO SLIP",
+    transporter: "SDIP LOGISTICS",
+    destination: "KIAMBU",
+    driverIdentity: "524522125",
+    shift: "Day",
+    weighbridgeId: settings.weighbridges[0]?.id || "wb-main",
+    weighbridgeName: settings.weighbridges[0]?.name || "Main Weighbridge",
+    firstWeight: 7016,
+    finalWeight: 9059,
+    netWeight: 2043,
+    firstWeighedAt: capturedAt,
+    finalWeighedAt: capturedAt,
+    productEntries: [
+      {
+        id: "sample-product-1",
+        productId: "sample-product",
+        productName: "Granite",
+        unit: "kg",
+        packageCount: 0,
+        tareWeight: 0,
+        packingMode: "Loose",
+        packingTare: 0,
+        sequence: 1,
+        grossWeight: 8874,
+        previousWeight: 7016,
+        productWeight: 1858,
+        remarks: "",
+        capturedAt,
+        operatorName: "Admin Operator"
+      }
+    ],
+    cameraImages: settings.cameras.filter((camera) => camera.displayOnSlip).slice(0, 3).flatMap((camera) => [
+      sampleCameraImage(camera, "FIRST", capturedAt),
+      sampleCameraImage(camera, "FINAL", capturedAt)
+    ]),
+    operatorName: "Admin Operator",
+    remarks: "",
+    createdAt: capturedAt
+  };
+}
+
+function sampleCameraImage(camera: CameraSetting, weighmentType: CameraImage["weighmentType"], capturedAt: string): CameraImage {
+  const accent = camera.position === "REAR" ? "#f59e0b" : camera.position === "SIDE" ? "#64748b" : "#14b8a6";
+  const label = `${camera.name} ${weighmentType === "FIRST" ? "1st" : "2nd"} capture`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180"><rect width="320" height="180" fill="#111827"/><rect x="14" y="14" width="292" height="152" rx="8" fill="#172033" stroke="${accent}" stroke-width="3"/><circle cx="44" cy="44" r="18" fill="${accent}"/><path d="M68 126h64l-24-46H82zM188 126h70l-24-42h-44z" fill="#475569"/><rect x="84" y="132" width="188" height="8" rx="4" fill="#6b7280"/><text x="28" y="78" fill="white" font-family="Arial" font-size="20" font-weight="700">${label}</text></svg>`;
+  return {
+    id: `sample-${camera.id}-${weighmentType}`,
+    cameraId: camera.id,
+    cameraName: camera.name,
+    weighmentType,
+    position: camera.position,
+    imageUrl: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
+    capturedAt
+  };
+}
+
+function slipFieldValue(field: string | undefined, transaction: Transaction, settings: Settings) {
+  switch (field) {
+    case "companyName": return settings.companyName;
+    case "siteName": return settings.siteName;
+    case "transactionNo": return transaction.transactionNo;
+    case "createdAt": return fmtDate(transaction.createdAt);
+    case "vehicleNo": return transaction.vehicleNo || "-";
+    case "partyName": return transaction.partyName || "-";
+    case "driverName": return transaction.driverName || "-";
+    case "driverIdentity": return transaction.driverIdentity || "-";
+    case "transporter": return transaction.transporter || "-";
+    case "destination": return transaction.destination || "-";
+    case "weighbridgeName": return transaction.weighbridgeName || "-";
+    case "firstWeight": return fmtWeight(transaction.firstWeight);
+    case "firstWeighedAt": return transaction.firstWeighedAt ? fmtDate(transaction.firstWeighedAt) : "-";
+    case "finalWeight": return fmtWeight(transaction.finalWeight);
+    case "finalWeighedAt": return transaction.finalWeighedAt ? fmtDate(transaction.finalWeighedAt) : "-";
+    case "netWeight": return fmtWeight(transaction.netWeight);
+    case "operatorName": return transaction.operatorName || "-";
+    default: return "";
+  }
+}
+
+function SlipTemplateRenderer({ template, transaction, settings, cameraOrder = new Map<string, number>() }: { template: SlipTemplate; transaction: Transaction; settings: Settings; cameraOrder?: Map<string, number> }) {
+  return (
+    <div className="print-area slip-template-renderer" style={{ width: template.width, height: template.height }}>
+      {template.elements.filter((element) => element.visible).map((element) => (
+        <div
+          className={`slip-template-item slip-template-${element.type.toLowerCase()}`}
+          key={element.id}
+          style={{
+            left: element.x,
+            top: element.y,
+            width: element.w,
+            height: element.h,
+            fontSize: element.fontSize,
+            fontWeight: element.bold ? 800 : 500,
+            textAlign: element.align
+          }}
+        >
+          <SlipTemplateElementView element={element} transaction={transaction} settings={settings} cameraOrder={cameraOrder} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SlipTemplateElementView({ element, transaction, settings, cameraOrder = new Map<string, number>() }: { element: SlipTemplateElement; transaction: Transaction; settings: Settings; cameraOrder?: Map<string, number> }) {
+  if (element.type === "TEXT") {
+    return <span>{slipFieldValue(element.field, transaction, settings) || element.label}</span>;
+  }
+  if (element.type === "FIELD") {
+    return <><span>{element.label}</span><strong>{slipFieldValue(element.field, transaction, settings) || "-"}</strong></>;
+  }
+  if (element.type === "PRODUCT_TABLE") {
+    return (
+      <div className="slip-template-products">
+        <strong>{element.label}</strong>
+        <table>
+          <thead><tr><th>Product</th><th>Pkgs</th><th>Gross</th><th>Net/Product</th><th>Unit</th></tr></thead>
+          <tbody>
+            {transaction.productEntries.length === 0 ? (
+              <tr><td colSpan={5}>No products captured.</td></tr>
+            ) : transaction.productEntries.map((entry) => (
+              <tr key={entry.id}>
+                <td>{entry.productName}</td>
+                <td>{entry.packageCount}</td>
+                <td>{fmtWeight(entry.grossWeight)}</td>
+                <td>{fmtWeight(entry.productWeight)}</td>
+                <td>{entry.unit}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+  if (element.type === "CAMERA_GROUP") {
+    const images = slipWeighmentImages(transaction.cameraImages, element.cameraGroup || "FIRST", cameraOrder);
+    return (
+      <div className="slip-template-cameras">
+        <strong>{element.label}</strong>
+        {images.length === 0 ? <span>No images</span> : (
+          <div className="template-camera-grid">
+            {images.map((image) => (
+              <figure key={image.id}>
+                <img src={image.imageUrl} alt={`${image.cameraName} ${image.weighmentType} capture`} />
+                <figcaption>{image.cameraName} | {image.position}</figcaption>
+              </figure>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+  if (element.type === "QR") {
+    return <div className="slip-template-qr"><span aria-hidden="true" /><strong>{element.label}</strong><small>{slipFieldValue(element.field, transaction, settings) || transaction.transactionNo}</small></div>;
+  }
+  if (element.type === "SIGNATURE") {
+    return <div className="slip-template-signature"><span>{element.label}</span><strong /></div>;
+  }
+  return <hr className="slip-template-line" />;
 }
 
 function slipWeighmentImages(images: CameraImage[], weighmentType: CameraImage["weighmentType"], cameraOrder: Map<string, number>) {
@@ -1940,6 +2344,7 @@ function MenuIcon({ name }: { name: string }) {
     Reports: BarChart3,
     "Audit Logs": History,
     Users: UsersIcon,
+    "Slip Designer": Package,
     Settings: SettingsIcon
   };
   const Icon = icons[name] || LayoutDashboard;

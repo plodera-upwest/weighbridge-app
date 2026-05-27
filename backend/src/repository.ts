@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { createTrialLicense } from "./license";
-import { AuditLog, Db, Role, Settings } from "./types";
+import { AuditLog, Db, Role, Settings, SlipTemplate } from "./types";
 
 const DATA_DIR = path.join(process.cwd(), "data");
 const DB_PATH = path.join(DATA_DIR, "runtime-db.json");
@@ -44,6 +44,32 @@ export function assertStrongPassword(password: string) {
   if (!strongPassword(password)) {
     throw new Error("Password must include uppercase, lowercase, number, symbol, and at least 8 characters");
   }
+}
+
+export function defaultSlipTemplate(): SlipTemplate {
+  return {
+    paperSize: "A4",
+    width: 794,
+    height: 1123,
+    elements: [
+      { id: "tpl-company", type: "TEXT", label: "Company Name", field: "companyName", x: 40, y: 28, w: 714, h: 36, fontSize: 22, bold: true, align: "center", visible: true },
+      { id: "tpl-site", type: "TEXT", label: "Site Name", field: "siteName", x: 40, y: 66, w: 714, h: 24, fontSize: 14, bold: false, align: "center", visible: true },
+      { id: "tpl-slip", type: "FIELD", label: "Slip No.", field: "transactionNo", x: 44, y: 112, w: 330, h: 28, fontSize: 13, bold: true, align: "left", visible: true },
+      { id: "tpl-date", type: "FIELD", label: "Date", field: "createdAt", x: 420, y: 112, w: 330, h: 28, fontSize: 13, bold: false, align: "left", visible: true },
+      { id: "tpl-vehicle", type: "FIELD", label: "Vehicle", field: "vehicleNo", x: 44, y: 150, w: 330, h: 28, fontSize: 13, bold: true, align: "left", visible: true },
+      { id: "tpl-party", type: "FIELD", label: "Customer/Supplier", field: "partyName", x: 420, y: 150, w: 330, h: 28, fontSize: 13, bold: false, align: "left", visible: true },
+      { id: "tpl-driver", type: "FIELD", label: "Driver", field: "driverName", x: 44, y: 188, w: 330, h: 28, fontSize: 13, bold: false, align: "left", visible: true },
+      { id: "tpl-transporter", type: "FIELD", label: "Transporter", field: "transporter", x: 420, y: 188, w: 330, h: 28, fontSize: 13, bold: false, align: "left", visible: true },
+      { id: "tpl-first", type: "FIELD", label: "1st Weight", field: "firstWeight", x: 44, y: 240, w: 220, h: 32, fontSize: 14, bold: true, align: "left", visible: true },
+      { id: "tpl-second", type: "FIELD", label: "2nd Weight", field: "finalWeight", x: 286, y: 240, w: 220, h: 32, fontSize: 14, bold: true, align: "left", visible: true },
+      { id: "tpl-net", type: "FIELD", label: "Net Weight", field: "netWeight", x: 528, y: 240, w: 220, h: 32, fontSize: 15, bold: true, align: "left", visible: true },
+      { id: "tpl-products", type: "PRODUCT_TABLE", label: "Products", x: 44, y: 305, w: 706, h: 170, fontSize: 12, bold: false, align: "left", visible: true },
+      { id: "tpl-first-cams", type: "CAMERA_GROUP", label: "1st Weight Camera Captures", cameraGroup: "FIRST", x: 44, y: 500, w: 706, h: 160, fontSize: 11, bold: false, align: "left", visible: true },
+      { id: "tpl-final-cams", type: "CAMERA_GROUP", label: "2nd Weight Camera Captures", cameraGroup: "FINAL", x: 44, y: 682, w: 706, h: 160, fontSize: 11, bold: false, align: "left", visible: true },
+      { id: "tpl-qr", type: "QR", label: "QR Verification", field: "transactionNo", x: 44, y: 880, w: 220, h: 55, fontSize: 12, bold: false, align: "left", visible: true },
+      { id: "tpl-signature", type: "SIGNATURE", label: "Signature", x: 420, y: 884, w: 330, h: 45, fontSize: 12, bold: false, align: "left", visible: true }
+    ]
+  };
 }
 
 const settings: Settings = {
@@ -92,7 +118,8 @@ const settings: Settings = {
     { id: "cam-front", name: "Front Camera", classification: "Weighbridge slip", position: "FRONT", rtspUrl: "rtsp://192.168.1.20/front", username: "admin", password: "", captureTiming: "BOTH", displayOnSlip: true, displayOrder: 1, active: true },
     { id: "cam-rear", name: "Rear Camera", classification: "Weighbridge slip", position: "REAR", rtspUrl: "rtsp://192.168.1.21/rear", username: "admin", password: "", captureTiming: "BOTH", displayOnSlip: true, displayOrder: 2, active: true },
     { id: "cam-side", name: "Side Camera", classification: "Weighbridge slip", position: "SIDE", rtspUrl: "rtsp://192.168.1.22/side", username: "admin", password: "", captureTiming: "FINAL", displayOnSlip: true, displayOrder: 3, active: true }
-  ]
+  ],
+  slipTemplate: defaultSlipTemplate()
 };
 
 const seedDb: Db = {
@@ -168,6 +195,11 @@ export function readDb(): Db {
 
   if (typeof db.settings.slipSearchControlsVisible !== "boolean") {
     db.settings.slipSearchControlsVisible = false;
+    changed = true;
+  }
+
+  if (!db.settings.slipTemplate || !Array.isArray(db.settings.slipTemplate.elements)) {
+    db.settings.slipTemplate = defaultSlipTemplate();
     changed = true;
   }
 

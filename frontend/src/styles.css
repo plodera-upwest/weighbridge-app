@@ -4154,3 +4154,251 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+.designer-shell {
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.designer-tools {
+  position: sticky;
+  top: 18px;
+  display: grid;
+  gap: 16px;
+  align-content: start;
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+}
+
+.designer-button-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.designer-properties {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid #e2e8f0;
+  padding-top: 14px;
+}
+
+.designer-properties h3 {
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.designer-prop-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.designer-canvas-panel {
+  min-width: 0;
+}
+
+.designer-canvas-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 14px;
+  color: #334155;
+  font-size: 13px;
+}
+
+.designer-canvas-toolbar span {
+  border-radius: 999px;
+  background: #eff6ff;
+  padding: 5px 10px;
+  color: #1d4ed8;
+  font-weight: 800;
+}
+
+.designer-canvas-wrap {
+  max-height: calc(100vh - 178px);
+  overflow: auto;
+  border: 1px solid #dbe3ee;
+  border-radius: 18px;
+  background:
+    linear-gradient(90deg, rgba(148, 163, 184, 0.12) 1px, transparent 1px),
+    linear-gradient(rgba(148, 163, 184, 0.12) 1px, transparent 1px),
+    #e8eef8;
+  background-size: 24px 24px;
+  padding: 24px;
+}
+
+.slip-designer-canvas,
+.slip-template-renderer {
+  position: relative;
+  overflow: hidden;
+  background: #ffffff;
+  color: #0f172a;
+  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.16);
+}
+
+.designer-element {
+  position: absolute;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 2px 4px;
+  cursor: move;
+  user-select: none;
+}
+
+.designer-element:hover {
+  border-color: rgba(37, 99, 235, 0.35);
+}
+
+.designer-element.is-selected {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18);
+}
+
+.designer-element.is-hidden {
+  opacity: 0.42;
+}
+
+.designer-resize-handle {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  width: 13px;
+  height: 13px;
+  border: 2px solid #ffffff;
+  border-radius: 999px;
+  background: #2563eb;
+  cursor: nwse-resize;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.22);
+}
+
+.slip-template-renderer {
+  margin: 0 auto;
+  font-family: "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+}
+
+.slip-template-item {
+  position: absolute;
+  overflow: hidden;
+  padding: 2px 4px;
+  line-height: 1.35;
+}
+
+.slip-template-field {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px dashed #cbd5e1;
+}
+
+.slip-template-field strong {
+  text-align: right;
+}
+
+.slip-template-products {
+  display: grid;
+  gap: 6px;
+  height: 100%;
+}
+
+.slip-template-products table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: inherit;
+}
+
+.slip-template-products th,
+.slip-template-products td {
+  border: 1px solid #dbe3ee;
+  padding: 3px 5px;
+  text-align: left;
+}
+
+.slip-template-cameras {
+  display: grid;
+  gap: 6px;
+}
+
+.template-camera-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.template-camera-grid figure {
+  overflow: hidden;
+  border: 1px solid #cbd5e1;
+  margin: 0;
+}
+
+.template-camera-grid img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+}
+
+.template-camera-grid figcaption {
+  padding: 3px 5px;
+  color: #334155;
+  font-size: 10px;
+}
+
+.slip-template-qr {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.slip-template-qr span {
+  width: 48px;
+  height: 48px;
+  border: 1px solid #0f172a;
+  background:
+    linear-gradient(90deg, #0f172a 50%, transparent 0) 0 0 / 12px 12px,
+    linear-gradient(#0f172a 50%, transparent 0) 0 0 / 12px 12px,
+    #ffffff;
+}
+
+.slip-template-qr small {
+  color: #475569;
+  font-size: 0.82em;
+}
+
+.slip-template-signature {
+  display: grid;
+  gap: 16px;
+}
+
+.slip-template-signature strong {
+  display: block;
+  border-bottom: 1px solid #0f172a;
+}
+
+.slip-template-line {
+  border: 0;
+  border-top: 1px solid #0f172a;
+}
+
+@media (max-width: 1200px) {
+  .designer-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .designer-tools {
+    position: static;
+    max-height: none;
+  }
+}
+
+@media print {
+  .slip-template-renderer {
+    box-shadow: none;
+  }
+}

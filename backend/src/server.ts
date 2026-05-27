@@ -5,9 +5,9 @@ import path from "node:path";
 import { captureCameras, renderCameraSvg } from "./camera";
 import { readLiveWeight } from "./device-client";
 import { activateLicense, licenseStatus } from "./license";
-import { assertStrongPassword, audit, hashPassword, isRole, needsPasswordRehash, nextTransactionNo, peekTransactionNo, readDb, uid, verifyPassword, writeDb } from "./repository";
+import { assertStrongPassword, audit, defaultSlipTemplate, hashPassword, isRole, needsPasswordRehash, nextTransactionNo, peekTransactionNo, readDb, uid, verifyPassword, writeDb } from "./repository";
 import { hasPermission, publicUser } from "./rbac";
-import { Driver, Party, Permission, Product, ProductEntry, Settings, User, Vehicle } from "./types";
+import { Driver, Party, Permission, Product, ProductEntry, Settings, SlipTemplate, SlipTemplateElement, User, Vehicle } from "./types";
 
 const PORT = Number(process.env.PORT || 4175);
 const HOST = process.env.HOST || "0.0.0.0";
@@ -221,6 +221,38 @@ function normalizeCameras(input: unknown, existing: Settings["cameras"]) {
     ...camera,
     displayOrder: index + 1
   }));
+}
+
+function normalizeSlipTemplate(input: unknown, existing: SlipTemplate): SlipTemplate {
+  const fallback = existing && Array.isArray(existing.elements) ? existing : defaultSlipTemplate();
+  const value = input && typeof input === "object" ? input as Record<string, unknown> : {};
+  const paperSize: SlipTemplate["paperSize"] = value.paperSize === "A5" || value.paperSize === "THERMAL_80" ? value.paperSize : value.paperSize === "A4" ? "A4" : fallback.paperSize;
+  const defaultSize = paperSize === "THERMAL_80" ? { width: 302, height: 900 } : paperSize === "A5" ? { width: 559, height: 794 } : { width: 794, height: 1123 };
+  const width = Math.max(240, Math.min(1400, Number(value.width || defaultSize.width)));
+  const height = Math.max(360, Math.min(1800, Number(value.height || defaultSize.height)));
+  const elementsInput = Array.isArray(value.elements) ? value.elements : fallback.elements;
+  const elements: SlipTemplateElement[] = elementsInput.map((item, index) => {
+    const element = item && typeof item === "object" ? item as Record<string, unknown> : {};
+    const type = ["TEXT", "FIELD", "PRODUCT_TABLE", "CAMERA_GROUP", "QR", "SIGNATURE", "LINE"].includes(text(element.type)) ? text(element.type) as SlipTemplateElement["type"] : "FIELD";
+    const align: SlipTemplateElement["align"] = element.align === "center" || element.align === "right" ? element.align : "left";
+    const cameraGroup: SlipTemplateElement["cameraGroup"] = element.cameraGroup === "FINAL" ? "FINAL" : "FIRST";
+    return {
+      id: text(element.id) || uid("tpl"),
+      type,
+      label: text(element.label, `Item ${index + 1}`),
+      field: text(element.field),
+      cameraGroup,
+      x: Math.max(0, Math.min(width - 30, Number(element.x || 0))),
+      y: Math.max(0, Math.min(height - 20, Number(element.y || 0))),
+      w: Math.max(30, Math.min(width, Number(element.w || 160))),
+      h: Math.max(10, Math.min(height, Number(element.h || 30))),
+      fontSize: Math.max(8, Math.min(40, Number(element.fontSize || 12))),
+      bold: bool(element.bold, false),
+      align,
+      visible: bool(element.visible, true)
+    };
+  });
+  return { paperSize, width, height, elements };
 }
 
 function csvCell(value: unknown) {
@@ -829,6 +861,7 @@ app.patch("/api/settings", auth, permit("CHANGE_SETTINGS"), (req: AuthedRequest,
     };
   }
   db.settings.cameras = normalizeCameras(req.body.cameras, db.settings.cameras);
+  db.settings.slipTemplate = normalizeSlipTemplate(req.body.slipTemplate, db.settings.slipTemplate);
   audit(db, { userId: req.user!.id, userName: req.user!.name, action: "CHANGE_SETTINGS", entityType: "SETTINGS", entityId: "system", details: "System settings updated" });
   writeDb(db);
   res.json(db.settings);
