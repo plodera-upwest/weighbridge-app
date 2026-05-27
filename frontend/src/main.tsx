@@ -625,6 +625,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
   const [quickAddError, setQuickAddError] = useState("");
   const [vehicleSlipPopupOpen, setVehicleSlipPopupOpen] = useState(false);
   const [lastVehiclePopupId, setLastVehiclePopupId] = useState("");
+  const [operatorPopup, setOperatorPopup] = useState<{ title: string; message: string; tone: "success" | "warning" | "error" } | null>(null);
   const [draftSelection, setDraftSelection] = useState({ vehicleId: "", partyId: "", driverId: "" });
   const [productDraft, setProductDraft] = useState({
     productId: "",
@@ -826,29 +827,34 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
     onToast(`Continuing slip ${transaction.transactionNo}`);
   };
 
+  const showOperatorPopup = (title: string, message: string, tone: "success" | "warning" | "error" = "warning") => {
+    setOperatorPopup({ title, message, tone });
+  };
+
+  const showWorkflowWarning = (title: string, message: string) => {
+    setCreateError(message);
+    showOperatorPopup(title, message, "warning");
+  };
+
   const saveSlip = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = event.currentTarget;
     setCreateError("");
     if (activeSlip) {
       if (activeSlip.status === "COMPLETED") {
-        onToast("Completed slips cannot be changed");
+        showOperatorPopup("Slip Locked", "Completed slips cannot be changed.", "warning");
         return;
       }
       if (!capturedWeight) {
-        const message = "Capture weight first to save";
-        setCreateError(message);
-        onToast(message);
+        showWorkflowWarning("Capture Weight First", "Capture weight first to save.");
         return;
       }
       if (systemWeighmentType === "FIRST") {
         if (activeSlip.firstWeight != null) {
-          const message = "Add product lines before saving 2nd Weight";
-          setCreateError(message);
-          onToast(message);
+          showWorkflowWarning("Product Required", "Add product lines before saving 2nd Weight.");
           return;
         }
-        const saved = await action(`/api/transactions/${activeSlip.id}/first-weigh`, { weight: capturedWeight.weight, skipCameraCapture: true }, "First weight saved");
+        const saved = await action(`/api/transactions/${activeSlip.id}/first-weigh`, { weight: capturedWeight.weight, skipCameraCapture: true }, "1st weight saved successfully.", "Saved", "success");
         if (saved) {
           setCapturedWeight(null);
           setPendingFirstWeight(null);
@@ -856,37 +862,27 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
         return;
       }
       if (activeSlip.firstWeight == null) {
-        const message = "Save first weight before selecting 2nd Weight";
-        setCreateError(message);
-        onToast(message);
+        showWorkflowWarning("1st Weight Required", "Save first weight before saving 2nd Weight.");
         return;
       }
       if (activeSlip.mode === "MULTIPLE" && activeSlip.productEntries.length === 0) {
-        const message = "Add product lines before saving 2nd Weight";
-        setCreateError(message);
-        onToast(message);
+        showWorkflowWarning("Product Required", "Add product lines before saving 2nd Weight.");
         return;
       }
       if (activeSlip.mode !== "MULTIPLE" && !productDraft.productId) {
-        const message = "Select product before saving 2nd Weight";
-        setCreateError(message);
-        onToast(message);
+        showWorkflowWarning("Product Required", "Please select a product before saving this slip.");
         return;
       }
-      const saved = await action(`/api/transactions/${activeSlip.id}/final-weigh`, { ...productDraft, weight: capturedWeight.weight, skipCameraCapture: true }, "Second weight saved");
+      const saved = await action(`/api/transactions/${activeSlip.id}/final-weigh`, { ...productDraft, weight: capturedWeight.weight, skipCameraCapture: true }, "2nd weight saved and slip completed successfully.", "Saved", "success");
       if (saved) setCapturedWeight(null);
       return;
     }
     if (!capturedWeight) {
-      const message = "Capture weight first to save";
-      setCreateError(message);
-      onToast(message);
+      showWorkflowWarning("Capture Weight First", "Capture weight first to save.");
       return;
     }
     if (!newSlipStarted) {
-      const message = "Click New Slip before saving a new slip";
-      setCreateError(message);
-      onToast(message);
+      showWorkflowWarning("New Slip Required", "Click New Slip before saving a new slip.");
       return;
     }
     const capturedFirstWeight = capturedWeight;
@@ -912,61 +908,65 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
         previewError = errorMessage(err, "Slip saved, but next slip number could not be loaded");
       }
       await resetEntry(false);
-      onToast(previewError || `Slip ${transaction.transactionNo} saved. Select it from Select Slip to continue.`);
+      if (previewError) {
+        showOperatorPopup("Saved With Warning", previewError, "warning");
+      } else {
+        showOperatorPopup("Saved", `Slip ${transaction.transactionNo} saved successfully. Select it from Select Slip to continue.`, "success");
+      }
       if (previewError) setCreateError(previewError);
     } catch (err) {
-      setCreateError(errorMessage(err, "Could not create transaction"));
+      const message = errorMessage(err, "Could not create transaction");
+      setCreateError(message);
+      showOperatorPopup("Save Failed", message, "error");
     } finally {
       setIsCreating(false);
     }
   };
 
-  const action = async (path: string, body: object, message: string) => {
+  const action = async (path: string, body: object, message: string, popupTitle?: string, popupTone: "success" | "warning" | "error" = "success") => {
     try {
       await api(path, { method: "POST", body: JSON.stringify(body) });
       await onRefresh();
-      onToast(message);
+      if (popupTitle) {
+        showOperatorPopup(popupTitle, message, popupTone);
+      } else {
+        onToast(message);
+      }
       return true;
     } catch (err) {
-      onToast(errorMessage(err, "Action failed"));
+      const error = errorMessage(err, "Action failed");
+      showOperatorPopup("Action Failed", error, "error");
       return false;
     }
   };
 
   const captureProduct = async () => {
     if (!activeSlip) {
-      onToast("Select an open slip first");
+      showOperatorPopup("Open Slip Required", "Select an open slip first.", "warning");
       return;
     }
     if (activeSlip.status === "COMPLETED") {
-      onToast("Completed slips cannot be changed");
+      showOperatorPopup("Slip Locked", "Completed slips cannot be changed.", "warning");
       return;
     }
     if (activeSlip.firstWeight == null) {
-      const message = "Capture first weight before adding products";
-      setCreateError(message);
-      onToast(message);
+      showWorkflowWarning("1st Weight Required", "Capture first weight before adding products.");
       return;
     }
     if (activeSlip.mode !== "MULTIPLE") {
-      const message = "Single product slips use the 2nd Weight as the product line";
-      setCreateError(message);
-      onToast(message);
+      showWorkflowWarning("Single Product Workflow", "Single product slips use the 2nd Weight as the product line.");
       return;
     }
     if (!capturedWeight) {
-      const message = "Capture weight first before adding product";
-      setCreateError(message);
-      onToast(message);
+      showWorkflowWarning("Capture Weight First", "Capture weight first before adding product.");
       return;
     }
     if (!productDraft.productId) {
-      const message = "Product needs to be selected before capturing weight";
-      setCreateError(message);
-      onToast(message);
+      showWorkflowWarning("Product Required", "Please select a product before adding the product line.");
       return;
     }
-    const captured = await action(`/api/transactions/${activeSlip.id}/product-weigh`, { ...productDraft, weight: capturedWeight.weight }, "Product line captured");
+    const productName = data.products.find((item) => item.id === productDraft.productId)?.name || "Product";
+    const captured = await action(`/api/transactions/${activeSlip.id}/product-weigh`, { ...productDraft, weight: capturedWeight.weight }, `${productName} product line saved successfully.`, "Product Saved", "success");
     if (captured) {
       setCapturedWeight(null);
       setProductDraft((current) => ({
@@ -980,19 +980,15 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
   const captureWeight = async () => {
     setCreateError("");
     if (isCompletedSlip) {
-      onToast("Completed slips cannot be changed");
+      showOperatorPopup("Slip Locked", "Completed slips cannot be changed.", "warning");
       return;
     }
     if (!activeSlip && !newSlipStarted) {
-      const message = "Click New Slip before capturing weight";
-      setCreateError(message);
-      onToast(message);
+      showWorkflowWarning("New Slip Required", "Click New Slip before capturing weight.");
       return;
     }
     if (!liveWeight.stable) {
-      const message = "Wait for stable weight before capturing";
-      setCreateError(message);
-      onToast(message);
+      showWorkflowWarning("Stable Weight Required", "Wait for stable weight before capturing.");
       return;
     }
     const nextCaptured = { weight: shownWeight, capturedAt: new Date().toISOString() };
@@ -1203,7 +1199,33 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
         onContinue={continueSlip}
       />
     )}
+    {operatorPopup && (
+      <OperatorPopup
+        title={operatorPopup.title}
+        message={operatorPopup.message}
+        tone={operatorPopup.tone}
+        onClose={() => setOperatorPopup(null)}
+      />
+    )}
     </>
+  );
+}
+
+function OperatorPopup({ title, message, tone, onClose }: { title: string; message: string; tone: "success" | "warning" | "error"; onClose: () => void }) {
+  return (
+    <div className="operator-popup-backdrop" onMouseDown={onClose}>
+      <section className={`operator-popup operator-popup-${tone}`} onMouseDown={(event) => event.stopPropagation()} role="alertdialog" aria-modal="true" aria-label={title}>
+        <div className="operator-popup-icon" aria-hidden="true">{tone === "success" ? "OK" : "!"}</div>
+        <div>
+          <span>{tone === "success" ? "Saved" : tone === "warning" ? "Workflow Check" : "Error"}</span>
+          <h2>{title}</h2>
+          <p>{message}</p>
+        </div>
+        <div className="operator-popup-actions">
+          <button className={tone === "success" ? "btn-primary" : "btn-secondary"} type="button" onClick={onClose} autoFocus>OK</button>
+        </div>
+      </section>
+    </div>
   );
 }
 
