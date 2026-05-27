@@ -551,6 +551,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
   const [isCreating, setIsCreating] = useState(false);
   const [quickAddKind, setQuickAddKind] = useState<QuickAddKind | null>(null);
   const [quickAddSaving, setQuickAddSaving] = useState(false);
+  const [quickAddError, setQuickAddError] = useState("");
   const [draftSelection, setDraftSelection] = useState({ vehicleId: "", partyId: "", driverId: "" });
   const [productDraft, setProductDraft] = useState({
     productId: "",
@@ -664,28 +665,60 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
     }
   };
 
+  const closeQuickAdd = () => {
+    setQuickAddKind(null);
+    setQuickAddError("");
+  };
+
   const quickAdd = async (kind: QuickAddKind, values: Record<string, string>) => {
     setQuickAddSaving(true);
+    setQuickAddError("");
     try {
       if (kind === "vehicle") {
+        const vehicleNo = String(values.vehicleNo || "").trim().toUpperCase();
+        const existingVehicle = data.vehicles.find((vehicle) => vehicle.vehicleNo.trim().toUpperCase() === vehicleNo);
+        if (existingVehicle) {
+          setDraftSelection((current) => ({ ...current, vehicleId: existingVehicle.id }));
+          onToast(`Vehicle ${existingVehicle.vehicleNo} selected`);
+          closeQuickAdd();
+          return;
+        }
         const vehicle = await api<Vehicle>("/api/vehicles", { method: "POST", body: JSON.stringify({ vehicleNo: values.vehicleNo, transporter: "" }) });
         setDraftSelection((current) => ({ ...current, vehicleId: vehicle.id }));
         onToast(`Vehicle ${vehicle.vehicleNo} added`);
       }
       if (kind === "party") {
-        const party = await api<Party>("/api/parties", { method: "POST", body: JSON.stringify({ name: values.name, type: "CUSTOMER", phone: "" }) });
+        const name = String(values.name || "").trim();
+        const existingParty = data.parties.find((party) => party.name.trim().toLowerCase() === name.toLowerCase());
+        if (existingParty) {
+          setDraftSelection((current) => ({ ...current, partyId: existingParty.id }));
+          onToast(`Customer ${existingParty.name} selected`);
+          closeQuickAdd();
+          return;
+        }
+        const party = await api<Party>("/api/parties", { method: "POST", body: JSON.stringify({ name, type: "CUSTOMER", phone: "" }) });
         setDraftSelection((current) => ({ ...current, partyId: party.id }));
         onToast(`Customer ${party.name} added`);
       }
       if (kind === "driver") {
-        const driver = await api<Driver>("/api/drivers", { method: "POST", body: JSON.stringify({ name: values.name, phone: "" }) });
+        const name = String(values.name || "").trim();
+        const existingDriver = data.drivers.find((driver) => driver.name.trim().toLowerCase() === name.toLowerCase());
+        if (existingDriver) {
+          setDraftSelection((current) => ({ ...current, driverId: existingDriver.id }));
+          onToast(`Driver ${existingDriver.name} selected`);
+          closeQuickAdd();
+          return;
+        }
+        const driver = await api<Driver>("/api/drivers", { method: "POST", body: JSON.stringify({ name, phone: "" }) });
         setDraftSelection((current) => ({ ...current, driverId: driver.id }));
         onToast(`Driver ${driver.name} added`);
       }
       await onRefresh();
-      setQuickAddKind(null);
+      closeQuickAdd();
     } catch (err) {
-      onToast(errorMessage(err, "Could not add record"));
+      const message = errorMessage(err, "Could not add record");
+      setQuickAddError(message);
+      onToast(message);
     } finally {
       setQuickAddSaving(false);
     }
@@ -1102,12 +1135,12 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
         </aside>
       </form>
     </section>
-    {quickAddKind && <QuickAddModal kind={quickAddKind} saving={quickAddSaving} onClose={() => setQuickAddKind(null)} onSubmit={quickAdd} />}
+    {quickAddKind && <QuickAddModal kind={quickAddKind} saving={quickAddSaving} error={quickAddError} onClose={closeQuickAdd} onSubmit={quickAdd} />}
     </>
   );
 }
 
-function QuickAddModal({ kind, saving, onClose, onSubmit }: { kind: QuickAddKind; saving: boolean; onClose: () => void; onSubmit: (kind: QuickAddKind, values: Record<string, string>) => Promise<void> }) {
+function QuickAddModal({ kind, saving, error, onClose, onSubmit }: { kind: QuickAddKind; saving: boolean; error: string; onClose: () => void; onSubmit: (kind: QuickAddKind, values: Record<string, string>) => Promise<void> }) {
   const title = kind === "vehicle" ? "Quick Add Vehicle" : kind === "party" ? "Quick Add Customer" : "Quick Add Driver";
   const fieldName = kind === "vehicle" ? "vehicleNo" : "name";
   const fieldLabel = kind === "vehicle" ? "Vehicle No" : kind === "party" ? "Customer Name" : "Driver Name";
@@ -1128,6 +1161,7 @@ function QuickAddModal({ kind, saving, onClose, onSubmit }: { kind: QuickAddKind
         </header>
         <form onSubmit={submit}>
           <label className="field">{fieldLabel}<input name={fieldName} placeholder={placeholder} required autoFocus /></label>
+          {error && <p className="quick-add-error" role="alert">{error}</p>}
           <div className="quick-add-modal-actions">
             <button className="btn-secondary" type="button" onClick={onClose} disabled={saving}>Cancel</button>
             <button className="btn-primary" type="submit" disabled={saving}>{saving ? "Adding..." : "Add and Select"}</button>
