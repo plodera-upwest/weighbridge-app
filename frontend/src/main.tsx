@@ -1815,9 +1815,8 @@ function Settings({ settings, disabled, onRefresh }: { settings: Settings; disab
 
 function SlipModal({ transaction, settings, onClose, onToast }: { transaction: Transaction; settings: Settings; onClose: () => void; onToast: (message: string) => void }) {
   const cameraOrder = new Map(settings.cameras.map((camera) => [camera.id, camera.displayOrder]));
-  const cameraImages = [...transaction.cameraImages].sort((left, right) => (cameraOrder.get(left.cameraId) || 99) - (cameraOrder.get(right.cameraId) || 99));
-  const firstCameraImages = cameraImages.filter((image) => image.weighmentType === "FIRST");
-  const finalCameraImages = cameraImages.filter((image) => image.weighmentType === "FINAL");
+  const firstCameraImages = slipWeighmentImages(transaction.cameraImages, "FIRST", cameraOrder);
+  const finalCameraImages = slipWeighmentImages(transaction.cameraImages, "FINAL", cameraOrder);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
@@ -1893,6 +1892,18 @@ function SlipModal({ transaction, settings, onClose, onToast }: { transaction: T
       </section>
     </div>
   );
+}
+
+function slipWeighmentImages(images: CameraImage[], weighmentType: CameraImage["weighmentType"], cameraOrder: Map<string, number>) {
+  const latestByCamera = new Map<string, CameraImage>();
+  for (const image of images) {
+    if (image.weighmentType !== weighmentType) continue;
+    const current = latestByCamera.get(image.cameraId);
+    if (!current || new Date(image.capturedAt).getTime() >= new Date(current.capturedAt).getTime()) {
+      latestByCamera.set(image.cameraId, image);
+    }
+  }
+  return [...latestByCamera.values()].sort((left, right) => (cameraOrder.get(left.cameraId) || 99) - (cameraOrder.get(right.cameraId) || 99));
 }
 
 function SlipCameraGroup({ title, images }: { title: string; images: CameraImage[] }) {
