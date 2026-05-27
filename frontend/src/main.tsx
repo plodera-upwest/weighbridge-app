@@ -2105,8 +2105,8 @@ function SlipModal({ transaction, settings, onClose, onToast }: { transaction: T
     }
   };
   return (
-    <div className="fixed inset-0 z-20 grid place-items-center bg-slate-950/60 p-4" onMouseDown={onClose}>
-      <section className="relative max-h-[92vh] w-full max-w-2xl overflow-auto rounded-lg bg-white p-5 shadow-2xl print:max-h-none print:overflow-visible print:shadow-none" onMouseDown={(event) => event.stopPropagation()}>
+    <div className="slip-print-overlay fixed inset-0 z-20 grid place-items-center bg-slate-950/60 p-4" onMouseDown={onClose}>
+      <section className="slip-print-sheet relative max-h-[92vh] w-full max-w-2xl overflow-auto rounded-lg bg-white p-5 shadow-2xl print:max-h-none print:overflow-visible print:shadow-none" onMouseDown={(event) => event.stopPropagation()}>
         <button
           aria-label="Close slip preview"
           className="absolute right-3 top-3 grid h-9 w-9 place-items-center rounded-md border border-slate-300 bg-white text-xl leading-none text-slate-700 hover:border-teal-700 hover:text-teal-800 print:hidden"
