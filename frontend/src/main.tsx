@@ -630,6 +630,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
   const [directSlipToConfirm, setDirectSlipToConfirm] = useState<Transaction | null>(null);
   const [lastVehiclePopupId, setLastVehiclePopupId] = useState("");
   const [operatorPopup, setOperatorPopup] = useState<{ title: string; message: string; tone: "success" | "warning" | "error" } | null>(null);
+  const [missingFieldKey, setMissingFieldKey] = useState("");
   const [draftSelection, setDraftSelection] = useState({ vehicleId: "", partyId: "", driverId: "" });
   const [productDraft, setProductDraft] = useState({
     productId: "",
@@ -921,8 +922,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
       showWorkflowWarning("New Slip Required", "Click New Slip before saving a new slip.");
       return;
     }
-    if (!productDraft.productId) {
-      showWorkflowWarning("Product Required", "Please select a product before saving this slip.");
+    if (!validateRequiredSlipFields(form)) {
       return;
     }
     if (!capturedWeight) {
@@ -1068,6 +1068,47 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
 
   const selectedProduct = data.products.find((item) => item.id === productDraft.productId);
 
+  const fieldClass = (key: string, extra = "") => `field ${extra} ${missingFieldKey === key ? "field-required-missing" : ""}`.trim();
+
+  const markRequiredField = (form: HTMLFormElement, key: string, title: string, message: string) => {
+    setMissingFieldKey(key);
+    showWorkflowWarning(title, message);
+    window.setTimeout(() => {
+      const field = form.querySelector(`[data-required-key="${key}"]`) as HTMLElement | null;
+      const control = field?.querySelector("select, input, textarea") as HTMLElement | null;
+      field?.scrollIntoView({ behavior: "smooth", block: "center" });
+      control?.focus();
+    }, 50);
+  };
+
+  const validateRequiredSlipFields = (form: HTMLFormElement) => {
+    const formData = formObject(form);
+    const movement = String(formData.movementType || shownMovementType || "").trim();
+    const mode = String(formData.mode || effectiveTransactionMode || "").trim();
+    const transporter = String(formData.transporter || "").trim();
+    const driverIdentity = String(formData.driverIdentity || "").trim();
+    const destination = String(formData.destination || "").trim();
+    const locationName = movement === "INBOUND" ? "Receiving location" : "Destination";
+    const checks = [
+      { key: "movementType", ok: Boolean(movement), title: "Movement Required", message: "Please select movement before saving." },
+      { key: "mode", ok: Boolean(mode), title: "Product Workflow Required", message: "Please select product workflow before saving." },
+      { key: "vehicleId", ok: Boolean(selectedVehicleId), title: "Vehicle No Required", message: "Please select vehicle number before saving." },
+      { key: "partyId", ok: Boolean(selectedPartyId), title: "Customer Required", message: "Please select customer before saving." },
+      { key: "transporter", ok: Boolean(transporter), title: "Transporter Required", message: "Please enter transporter before saving." },
+      { key: "driverId", ok: Boolean(selectedDriverId), title: "Driver Name Required", message: "Please select driver name before saving." },
+      { key: "driverIdentity", ok: Boolean(driverIdentity), title: "Driver ID Required", message: "Please enter driver ID before saving." },
+      { key: "destination", ok: Boolean(destination), title: `${locationName} Required`, message: `Please enter ${locationName.toLowerCase()} before saving.` },
+      { key: "productId", ok: Boolean(productDraft.productId), title: "Product Required", message: "Please select a product before saving this slip." }
+    ];
+    const missing = checks.find((item) => !item.ok);
+    if (missing) {
+      markRequiredField(form, missing.key, missing.title, missing.message);
+      return false;
+    }
+    setMissingFieldKey("");
+    return true;
+  };
+
   return (
     <>
     <section className="weighbridge-page">
@@ -1079,7 +1120,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
         </div>
       </header>
 
-      <form id="weighment-entry-form" className="weighbridge-workspace" key={`${entryFormKey}-${activeSlip?.id || "new"}`} onSubmit={saveSlip}>
+      <form id="weighment-entry-form" className="weighbridge-workspace" key={`${entryFormKey}-${activeSlip?.id || "new"}`} onSubmit={saveSlip} onChange={() => missingFieldKey && setMissingFieldKey("")} noValidate>
         {data.settings?.slipShiftVisible ? null : <input type="hidden" name="shift" value={activeSlip?.shift || "Day"} />}
         {data.settings?.slipWeighbridgeNodeVisible ? null : <input type="hidden" name="weighbridgeId" value={activeSlip?.weighbridgeId || activeWeighbridge?.id || ""} />}
 
@@ -1110,11 +1151,11 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
                   </option>
                 ))}
               </select></label>
-              <label className="field">Movement<select name="movementType" value={shownMovementType} onChange={(event) => setMovementType(event.target.value as "INBOUND" | "OUTBOUND")} disabled={lockLoadedSlipDetails}>
+              <label className={fieldClass("movementType")} data-required-key="movementType">Movement<select name="movementType" value={shownMovementType} onChange={(event) => setMovementType(event.target.value as "INBOUND" | "OUTBOUND")} disabled={lockLoadedSlipDetails}>
                 <option value="INBOUND">Inbound</option>
                 <option value="OUTBOUND">Outbound</option>
               </select></label>
-              <label className="field">Product Workflow<select name="mode" value={effectiveTransactionMode} onChange={(event) => setTransactionMode(event.target.value as TransactionMode)} disabled={Boolean(activeSlip)}>
+              <label className={fieldClass("mode")} data-required-key="mode">Product Workflow<select name="mode" value={effectiveTransactionMode} onChange={(event) => setTransactionMode(event.target.value as TransactionMode)} disabled={Boolean(activeSlip)}>
                 <option value="SINGLE">Single product</option>
                 <option value="MULTIPLE">Multiple products</option>
               </select></label>
@@ -1131,12 +1172,12 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
           <article className="wb-card party-card">
             <h2><span className="section-glyph">CA</span> Vehicle & Party Information</h2>
             <div className="wb-field-grid">
-              <label className="field quick-add-field">Vehicle No<span className="quick-add-control"><select name="vehicleId" value={selectedVehicleId} onChange={(event) => setDraftSelection((current) => ({ ...current, vehicleId: event.target.value }))} disabled={lockLoadedSlipDetails} required><option value="">Select vehicle</option>{data.vehicles.map((item) => <option key={item.id} value={item.id}>{item.vehicleNo}</option>)}</select><button className="quick-add-button" type="button" onClick={() => setQuickAddKind("vehicle")} disabled={lockLoadedSlipDetails || !can(data.user, "MANAGE_VEHICLES")} title="Quick add vehicle">+</button></span></label>
-              <label className="field quick-add-field">Customer<span className="quick-add-control"><select name="partyId" value={selectedPartyId} onChange={(event) => setDraftSelection((current) => ({ ...current, partyId: event.target.value }))} disabled={lockLoadedSlipDetails} required><option value="">Select customer</option>{data.parties.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><button className="quick-add-button" type="button" onClick={() => setQuickAddKind("party")} disabled={lockLoadedSlipDetails || !can(data.user, "MANAGE_PARTIES")} title="Quick add customer">+</button></span></label>
-              <label className="field">Transporter<input name="transporter" defaultValue={activeSlip?.transporter || ""} disabled={lockLoadedSlipDetails} /></label>
-              <label className="field quick-add-field">Driver Name<span className="quick-add-control"><select name="driverId" value={selectedDriverId} onChange={(event) => setDraftSelection((current) => ({ ...current, driverId: event.target.value }))} disabled={lockLoadedSlipDetails} required><option value="">Select driver</option>{data.drivers.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><button className="quick-add-button" type="button" onClick={() => setQuickAddKind("driver")} disabled={lockLoadedSlipDetails || !can(data.user, "MANAGE_DRIVERS")} title="Quick add driver">+</button></span></label>
-              <label className="field">Driver ID<input name="driverIdentity" defaultValue={activeSlip?.driverIdentity || ""} disabled={lockLoadedSlipDetails} /></label>
-              <label className="field">{locationLabel}<input name="destination" defaultValue={activeSlip?.destination || ""} disabled={lockLoadedSlipDetails} /></label>
+              <label className={fieldClass("vehicleId", "quick-add-field")} data-required-key="vehicleId">Vehicle No<span className="quick-add-control"><select name="vehicleId" value={selectedVehicleId} onChange={(event) => setDraftSelection((current) => ({ ...current, vehicleId: event.target.value }))} disabled={lockLoadedSlipDetails} required><option value="">Select vehicle</option>{data.vehicles.map((item) => <option key={item.id} value={item.id}>{item.vehicleNo}</option>)}</select><button className="quick-add-button" type="button" onClick={() => setQuickAddKind("vehicle")} disabled={lockLoadedSlipDetails || !can(data.user, "MANAGE_VEHICLES")} title="Quick add vehicle">+</button></span></label>
+              <label className={fieldClass("partyId", "quick-add-field")} data-required-key="partyId">Customer<span className="quick-add-control"><select name="partyId" value={selectedPartyId} onChange={(event) => setDraftSelection((current) => ({ ...current, partyId: event.target.value }))} disabled={lockLoadedSlipDetails} required><option value="">Select customer</option>{data.parties.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><button className="quick-add-button" type="button" onClick={() => setQuickAddKind("party")} disabled={lockLoadedSlipDetails || !can(data.user, "MANAGE_PARTIES")} title="Quick add customer">+</button></span></label>
+              <label className={fieldClass("transporter")} data-required-key="transporter">Transporter<input name="transporter" defaultValue={activeSlip?.transporter || ""} disabled={lockLoadedSlipDetails} /></label>
+              <label className={fieldClass("driverId", "quick-add-field")} data-required-key="driverId">Driver Name<span className="quick-add-control"><select name="driverId" value={selectedDriverId} onChange={(event) => setDraftSelection((current) => ({ ...current, driverId: event.target.value }))} disabled={lockLoadedSlipDetails} required><option value="">Select driver</option>{data.drivers.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><button className="quick-add-button" type="button" onClick={() => setQuickAddKind("driver")} disabled={lockLoadedSlipDetails || !can(data.user, "MANAGE_DRIVERS")} title="Quick add driver">+</button></span></label>
+              <label className={fieldClass("driverIdentity")} data-required-key="driverIdentity">Driver ID<input name="driverIdentity" defaultValue={activeSlip?.driverIdentity || ""} disabled={lockLoadedSlipDetails} /></label>
+              <label className={fieldClass("destination")} data-required-key="destination">{locationLabel}<input name="destination" defaultValue={activeSlip?.destination || ""} disabled={lockLoadedSlipDetails} /></label>
             </div>
             {!activeSlip && selectedVehicleId && vehicleOpenSlips.length > 0 && (
               <div className="vehicle-slip-hint">
@@ -1187,7 +1228,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
               <button className="btn-secondary" type="button" onClick={captureProduct} disabled={lockProductLineAction || !canAddIntermediateProduct || !can(data.user, "CAPTURE_PRODUCT_WEIGHT")}>Add Product Line</button>
             </div>
             <div className="product-line-form">
-              <label className="field">Material/Product<select value={productDraft.productId} onChange={(event) => {
+              <label className={fieldClass("productId")} data-required-key="productId">Material/Product<select value={productDraft.productId} onChange={(event) => {
                 const product = data.products.find((item) => item.id === event.target.value);
                 setProductDraft((current) => ({ ...current, productId: event.target.value, unit: product?.unit || "" }));
               }} disabled={lockProductSelection}><option value="">Select product</option>{data.products.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>

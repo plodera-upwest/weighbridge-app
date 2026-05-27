@@ -1820,6 +1820,10 @@
     text-transform: none;
   }
 
+  .weighbridge-workspace .field-required-missing {
+    color: #b91c1c;
+  }
+
   .weighbridge-workspace input,
   .weighbridge-workspace select {
     min-height: 34px;
@@ -1830,6 +1834,14 @@
     padding: 5px 12px;
     font-size: 14px;
     font-weight: 400;
+  }
+
+  .weighbridge-workspace .field-required-missing input,
+  .weighbridge-workspace .field-required-missing select,
+  .weighbridge-workspace .field-required-missing textarea {
+    border-color: #dc2626;
+    background: #fff7f7;
+    box-shadow: 0 0 0 4px rgba(220, 38, 38, 0.1);
   }
 
   .quick-add-field {

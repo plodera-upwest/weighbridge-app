@@ -568,7 +568,17 @@ app.post("/api/transactions", auth, permit("CREATE_TRANSACTION"), async (req: Au
     const driver = db.drivers.find((item) => item.id === text(req.body.driverId));
     const party = db.parties.find((item) => item.id === text(req.body.partyId));
     const plannedProduct = db.products.find((item) => item.id === text(req.body.productId));
+    const movementType = text(req.body.movementType);
+    const mode = text(req.body.mode);
+    const transporter = text(req.body.transporter);
+    const destination = text(req.body.destination);
+    const driverIdentity = text(req.body.driverIdentity);
+    if (movementType !== "INBOUND" && movementType !== "OUTBOUND") throw new Error("Movement is required");
+    if (mode !== "SINGLE" && mode !== "MULTIPLE") throw new Error("Product workflow is required");
     if (!vehicle || !driver || !party) throw new Error("Vehicle, driver, and customer/supplier are required");
+    if (!transporter) throw new Error("Transporter is required");
+    if (!driverIdentity) throw new Error("Driver ID is required");
+    if (!destination) throw new Error(movementType === "INBOUND" ? "Receiving location is required" : "Destination is required");
     if (!plannedProduct) throw new Error("Select product before saving the slip");
     if (!bool(req.body.captureInitialWeight, false)) throw new Error("Capture weight before saving the slip");
     const weighbridge = db.settings.weighbridges.find((item) => item.id === text(req.body.weighbridgeId)) || db.settings.weighbridges.find((item) => item.active) || db.settings.weighbridges[0];
@@ -584,8 +594,8 @@ app.post("/api/transactions", auth, permit("CREATE_TRANSACTION"), async (req: Au
     const transaction = {
       id: uid("txn"),
       transactionNo,
-      mode: req.body.mode === "MULTIPLE" ? "MULTIPLE" as const : "SINGLE" as const,
-      movementType: req.body.movementType === "OUTBOUND" ? "OUTBOUND" as const : "INBOUND" as const,
+      mode: mode === "MULTIPLE" ? "MULTIPLE" as const : "SINGLE" as const,
+      movementType: movementType === "OUTBOUND" ? "OUTBOUND" as const : "INBOUND" as const,
       status: "IN_PROGRESS" as const,
       vehicleId: vehicle.id,
       vehicleNo: vehicle.vehicleNo,
@@ -593,9 +603,9 @@ app.post("/api/transactions", auth, permit("CREATE_TRANSACTION"), async (req: Au
       driverName: driver.name,
       partyId: party.id,
       partyName: party.name,
-      transporter: text(req.body.transporter, vehicle.transporter),
-      destination: text(req.body.destination),
-      driverIdentity: text(req.body.driverIdentity),
+      transporter,
+      destination,
+      driverIdentity,
       shift: text(req.body.shift, "Day"),
       weighbridgeId: weighbridge?.id || "",
       weighbridgeName: weighbridge?.name || "Weighbridge",
