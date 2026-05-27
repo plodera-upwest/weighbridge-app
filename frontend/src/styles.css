@@ -2034,6 +2034,52 @@
     white-space: nowrap;
   }
 
+  .slip-app .party-card {
+    min-height: 0 !important;
+    display: grid !important;
+    grid-template-rows: auto auto minmax(76px, 1fr) !important;
+  }
+
+  .slip-app .vehicle-slip-history {
+    min-height: 0 !important;
+    max-height: 170px !important;
+    overflow-y: auto !important;
+    padding-right: 4px !important;
+  }
+
+  .slip-app .vehicle-slip-history h3 {
+    margin-bottom: 4px !important;
+    font-size: 11px !important;
+    line-height: 1.1 !important;
+  }
+
+  .slip-app .vehicle-slip-list {
+    gap: 5px !important;
+  }
+
+  .slip-app .vehicle-slip-row {
+    min-height: 0 !important;
+    padding: 6px 8px !important;
+    border-radius: 10px !important;
+  }
+
+  .slip-app .vehicle-slip-row strong {
+    font-size: 12px !important;
+    line-height: 1.1 !important;
+  }
+
+  .slip-app .vehicle-slip-row span,
+  .slip-app .vehicle-slip-row small {
+    font-size: 10.5px !important;
+    line-height: 1.15 !important;
+  }
+
+  .slip-app .vehicle-slip-row .btn-secondary {
+    min-height: 26px !important;
+    padding: 4px 7px !important;
+    font-size: 10.5px !important;
+  }
+
   .digital-card {
     display: grid;
     gap: 10px;
