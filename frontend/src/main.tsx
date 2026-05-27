@@ -552,6 +552,8 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
   const [quickAddKind, setQuickAddKind] = useState<QuickAddKind | null>(null);
   const [quickAddSaving, setQuickAddSaving] = useState(false);
   const [quickAddError, setQuickAddError] = useState("");
+  const [vehicleSlipPopupOpen, setVehicleSlipPopupOpen] = useState(false);
+  const [lastVehiclePopupId, setLastVehiclePopupId] = useState("");
   const [draftSelection, setDraftSelection] = useState({ vehicleId: "", partyId: "", driverId: "" });
   const [productDraft, setProductDraft] = useState({
     productId: "",
@@ -590,6 +592,13 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
     : [];
   const vehicleOpenSlips = vehicleSlips.filter((item) => item.status !== "COMPLETED");
   const vehicleCompletedSlips = vehicleSlips.filter((item) => item.status === "COMPLETED").slice(0, 3);
+
+  useEffect(() => {
+    if (!selectedVehicleId || activeSlip || vehicleOpenSlips.length === 0) return;
+    if (lastVehiclePopupId === selectedVehicleId) return;
+    setVehicleSlipPopupOpen(true);
+    setLastVehiclePopupId(selectedVehicleId);
+  }, [selectedVehicleId, activeSlip?.id, vehicleOpenSlips.length, lastVehiclePopupId]);
 
   useEffect(() => {
     api<{ slipNo: string; mode: Settings["slipNumberMode"] }>("/api/transactions/next-slip-no")
@@ -632,6 +641,8 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
     setCreateError("");
     setMovementType("INBOUND");
     setTransactionMode("SINGLE");
+    setVehicleSlipPopupOpen(false);
+    setLastVehiclePopupId("");
     setDraftSelection({ vehicleId: "", partyId: "", driverId: "" });
     setProductDraft({
       productId: "",
@@ -733,6 +744,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
     setCreateError("");
     setMovementType(transaction.movementType || "INBOUND");
     setTransactionMode(transaction.mode);
+    setVehicleSlipPopupOpen(false);
     onToast(`Continuing slip ${transaction.transactionNo}`);
   };
 
@@ -1011,41 +1023,10 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
               <label className="field">Driver ID<input name="driverIdentity" defaultValue={activeSlip?.driverIdentity || ""} disabled={lockLoadedSlipDetails} /></label>
               <label className="field">{locationLabel}<input name="destination" defaultValue={activeSlip?.destination || ""} disabled={lockLoadedSlipDetails} /></label>
             </div>
-            {!activeSlip && selectedVehicleId && (vehicleOpenSlips.length > 0 || vehicleCompletedSlips.length > 0) && (
-              <div className="vehicle-slip-history">
-                {vehicleOpenSlips.length > 0 && (
-                  <section>
-                    <h3>Open slips for this vehicle</h3>
-                    <div className="vehicle-slip-list">
-                      {vehicleOpenSlips.map((transaction) => (
-                        <article className="vehicle-slip-row is-open" key={transaction.id}>
-                          <div>
-                            <strong>{transaction.transactionNo}</strong>
-                            <span>{transaction.partyName} | {transaction.driverName} | {transaction.movementType === "OUTBOUND" ? "Outbound" : "Inbound"}</span>
-                            <small>{transaction.firstWeight != null ? `1st Weight ${fmtWeight(transaction.firstWeight)}` : "Waiting for 1st weight"} | {fmtDate(transaction.createdAt)}</small>
-                          </div>
-                          <button className="btn-secondary" type="button" onClick={() => continueSlip(transaction)}>Continue Slip</button>
-                        </article>
-                      ))}
-                    </div>
-                  </section>
-                )}
-                {vehicleCompletedSlips.length > 0 && (
-                  <section>
-                    <h3>Recent completed history</h3>
-                    <div className="vehicle-slip-list">
-                      {vehicleCompletedSlips.map((transaction) => (
-                        <article className="vehicle-slip-row" key={transaction.id}>
-                          <div>
-                            <strong>{transaction.transactionNo}</strong>
-                            <span>{transaction.partyName} | {transaction.driverName} | {transaction.movementType === "OUTBOUND" ? "Outbound" : "Inbound"}</span>
-                            <small>Net {fmtWeight(transaction.netWeight)} | {fmtDate(transaction.createdAt)}</small>
-                          </div>
-                        </article>
-                      ))}
-                    </div>
-                  </section>
-                )}
+            {!activeSlip && selectedVehicleId && vehicleOpenSlips.length > 0 && (
+              <div className="vehicle-slip-hint">
+                <span>{vehicleOpenSlips.length} open slip{vehicleOpenSlips.length === 1 ? "" : "s"} found for this vehicle</span>
+                <button className="btn-secondary" type="button" onClick={() => setVehicleSlipPopupOpen(true)}>View</button>
               </div>
             )}
           </article>
@@ -1136,7 +1117,59 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
       </form>
     </section>
     {quickAddKind && <QuickAddModal kind={quickAddKind} saving={quickAddSaving} error={quickAddError} onClose={closeQuickAdd} onSubmit={quickAdd} />}
+    {vehicleSlipPopupOpen && !activeSlip && selectedVehicleId && (
+      <VehicleSlipPopup
+        vehicleNo={data.vehicles.find((vehicle) => vehicle.id === selectedVehicleId)?.vehicleNo || "selected vehicle"}
+        openSlips={vehicleOpenSlips}
+        completedSlips={vehicleCompletedSlips}
+        onClose={() => setVehicleSlipPopupOpen(false)}
+        onContinue={continueSlip}
+      />
+    )}
     </>
+  );
+}
+
+function VehicleSlipPopup({ vehicleNo, openSlips, completedSlips, onClose, onContinue }: { vehicleNo: string; openSlips: Transaction[]; completedSlips: Transaction[]; onClose: () => void; onContinue: (transaction: Transaction) => void }) {
+  return (
+    <div className="vehicle-slip-popup-backdrop" onMouseDown={onClose}>
+      <section className="vehicle-slip-popup" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label={`Open slips for ${vehicleNo}`}>
+        <header>
+          <div>
+            <span>Vehicle Handover</span>
+            <h2>Open Slips for {vehicleNo}</h2>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close open slip popup">x</button>
+        </header>
+        {openSlips.length > 0 ? (
+          <div className="vehicle-slip-popup-list">
+            {openSlips.map((transaction) => (
+              <article className="vehicle-slip-popup-row" key={transaction.id}>
+                <div>
+                  <strong>{transaction.transactionNo}</strong>
+                  <span>{transaction.partyName} | {transaction.driverName} | {transaction.movementType === "OUTBOUND" ? "Outbound" : "Inbound"}</span>
+                  <small>{transaction.firstWeight != null ? `1st Weight ${fmtWeight(transaction.firstWeight)}` : "Waiting for 1st weight"} | {fmtDate(transaction.createdAt)} | {transaction.status.replace("_", " ")}</small>
+                </div>
+                <button className="btn-primary" type="button" onClick={() => onContinue(transaction)}>Continue Slip</button>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="vehicle-slip-popup-empty">No open slips found for this vehicle.</p>
+        )}
+        {completedSlips.length > 0 && (
+          <section className="vehicle-slip-popup-history">
+            <h3>Recent completed history</h3>
+            {completedSlips.map((transaction) => (
+              <div key={transaction.id}>
+                <strong>{transaction.transactionNo}</strong>
+                <span>{transaction.partyName} | Net {fmtWeight(transaction.netWeight)} | {fmtDate(transaction.createdAt)}</span>
+              </div>
+            ))}
+          </section>
+        )}
+      </section>
+    </div>
   );
 }
 
