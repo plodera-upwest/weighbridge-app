@@ -627,6 +627,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
   const [quickAddSaving, setQuickAddSaving] = useState(false);
   const [quickAddError, setQuickAddError] = useState("");
   const [vehicleSlipPopupOpen, setVehicleSlipPopupOpen] = useState(false);
+  const [directSlipToConfirm, setDirectSlipToConfirm] = useState<Transaction | null>(null);
   const [lastVehiclePopupId, setLastVehiclePopupId] = useState("");
   const [operatorPopup, setOperatorPopup] = useState<{ title: string; message: string; tone: "success" | "warning" | "error" } | null>(null);
   const [draftSelection, setDraftSelection] = useState({ vehicleId: "", partyId: "", driverId: "" });
@@ -736,6 +737,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
     setMovementType("INBOUND");
     setTransactionMode("SINGLE");
     setVehicleSlipPopupOpen(false);
+    setDirectSlipToConfirm(null);
     setLastVehiclePopupId("");
     setDraftSelection({ vehicleId: "", partyId: "", driverId: "" });
     setProductDraft({
@@ -839,7 +841,28 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
     setMovementType(transaction.movementType || "INBOUND");
     setTransactionMode(transaction.mode);
     setVehicleSlipPopupOpen(false);
+    setDirectSlipToConfirm(null);
     onToast(`Continuing slip ${transaction.transactionNo}`);
+  };
+
+  const selectSlipDirectly = (slipId: string) => {
+    const selectedSlip = selectableTransactions.find((item) => item.id === slipId);
+    if (!selectedSlip) {
+      setActiveSlipId("");
+      setPendingFirstWeight(null);
+      setCapturedWeight(null);
+      setCreateError("");
+      setMovementType("INBOUND");
+      setTransactionMode("SINGLE");
+      setDirectSlipToConfirm(null);
+      return;
+    }
+    if (selectedSlip.id === activeSlipId) return;
+    if (selectedSlip.status === "COMPLETED") {
+      continueSlip(selectedSlip);
+      return;
+    }
+    setDirectSlipToConfirm(selectedSlip);
   };
 
   const showOperatorPopup = (title: string, message: string, tone: "success" | "warning" | "error" = "warning") => {
@@ -1074,15 +1097,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
             <div className="wb-field-grid wb-two">
               <label className={`field field-muted ${slipNoIsPlaceholder ? "is-placeholder-slip" : ""}`}>Slip No<input value={shownSlipNo} readOnly /></label>
               <label className="field field-muted">Date Time<input value={activeSlip ? fmtSlipDateTime(activeSlip.createdAt) : fmtSlipDateTime()} readOnly /></label>
-              <label className="field">Select Slip<select value={activeSlip?.id || ""} onChange={(event) => {
-                const selectedSlip = selectableTransactions.find((item) => item.id === event.target.value);
-                setActiveSlipId(event.target.value);
-                setPendingFirstWeight(null);
-                setCapturedWeight(null);
-                setCreateError("");
-                setMovementType(selectedSlip?.movementType || "INBOUND");
-                setTransactionMode(selectedSlip?.mode || "SINGLE");
-              }}>
+              <label className="field">Select Slip<select value={activeSlip?.id || ""} onChange={(event) => selectSlipDirectly(event.target.value)}>
                 <option value=""></option>
                 {filteredSlips.map((item) => (
                   <option key={item.id} value={item.id}>
@@ -1220,6 +1235,13 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
         onContinue={continueSlip}
       />
     )}
+    {directSlipToConfirm && (
+      <DirectSlipConfirmPopup
+        transaction={directSlipToConfirm}
+        onClose={() => setDirectSlipToConfirm(null)}
+        onContinue={continueSlip}
+      />
+    )}
     {operatorPopup && (
       <OperatorPopup
         title={operatorPopup.title}
@@ -1244,6 +1266,34 @@ function OperatorPopup({ title, message, tone, onClose }: { title: string; messa
         </div>
         <div className="operator-popup-actions">
           <button className={tone === "success" ? "btn-primary" : "btn-secondary"} type="button" onClick={onClose} autoFocus>OK</button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function DirectSlipConfirmPopup({ transaction, onClose, onContinue }: { transaction: Transaction; onClose: () => void; onContinue: (transaction: Transaction) => void }) {
+  const nextStep = transaction.firstWeight == null ? "1st Weight" : "2nd Weight";
+  return (
+    <div className="vehicle-slip-popup-backdrop" onMouseDown={onClose}>
+      <section className="vehicle-slip-popup" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label={`Continue slip ${transaction.transactionNo}`}>
+        <header>
+          <span>Slip Checkpoint</span>
+          <button type="button" onClick={onClose} aria-label="Close">X</button>
+        </header>
+        <h2>Continue Open Slip?</h2>
+        <div className="vehicle-slip-popup-list">
+          <article className="vehicle-slip-popup-row">
+            <div>
+              <strong>{transaction.transactionNo}</strong>
+              <span>{transaction.vehicleNo} | {transaction.partyName} | {(transaction.movementType || "INBOUND").toLowerCase()}</span>
+              <small>{nextStep} | {fmtWeight(transaction.firstWeight)} | {fmtDate(transaction.firstWeighedAt || transaction.createdAt)} | {transaction.status.replaceAll("_", " ")}</small>
+            </div>
+            <button className="btn-primary" type="button" onClick={() => onContinue(transaction)}>Continue Slip</button>
+          </article>
+        </div>
+        <div className="operator-popup-actions">
+          <button className="btn-secondary" type="button" onClick={onClose}>Cancel</button>
         </div>
       </section>
     </div>
