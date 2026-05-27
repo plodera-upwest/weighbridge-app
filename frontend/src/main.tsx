@@ -578,7 +578,14 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
   const selectedDriverId = activeSlip?.driverId || draftSelection.driverId;
   const shownMovementType = activeSlip?.movementType || movementType;
   const locationLabel = shownMovementType === "INBOUND" ? "Receiving Location" : "Destination";
-  const displayedNetWeight = activeSlip?.netWeight ?? activeSlip?.firstWeight ?? pendingFirstWeight?.weight;
+  const pendingSecondWeight = activeSlip && activeSlip.firstWeight != null && activeSlip.finalWeight == null ? capturedWeight : null;
+  const displayedFirstWeight = activeSlip?.firstWeight ?? pendingFirstWeight?.weight;
+  const displayedFirstWeightDate = activeSlip?.firstWeighedAt ? fmtDate(activeSlip.firstWeighedAt) : pendingFirstWeight ? fmtDate(pendingFirstWeight.capturedAt) : "-";
+  const displayedSecondWeight = activeSlip?.finalWeight ?? pendingSecondWeight?.weight;
+  const displayedSecondWeightDate = activeSlip?.finalWeighedAt ? fmtDate(activeSlip.finalWeighedAt) : pendingSecondWeight ? fmtDate(pendingSecondWeight.capturedAt) : "-";
+  const displayedNetWeight = activeSlip?.netWeight
+    ?? (activeSlip?.firstWeight != null && pendingSecondWeight ? Math.abs(pendingSecondWeight.weight - activeSlip.firstWeight) : undefined)
+    ?? displayedFirstWeight;
   const activeWeighbridge = data.settings?.weighbridges.find((item) => item.active) || data.settings?.weighbridges[0];
   const shownWeight = livePaused && pausedWeight != null ? pausedWeight : liveWeight.weight;
   const filteredSlips = selectableTransactions.filter((item) => {
@@ -1051,16 +1058,15 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
                 <button className="btn-secondary" type="button" onClick={captureCamera} disabled={!activeSlip || isCompletedSlip}>Camera Capture</button>
               )}
             </div>
-            <p className={`captured-weight-note ${capturedWeight ? "is-captured" : ""}`}>{capturedWeight ? `Captured: ${fmtIndicatorWeight(capturedWeight.weight)} at ${fmtDate(capturedWeight.capturedAt)}` : "No weight captured for the next action"}</p>
           </article>
 
           <article className="wb-card weight-row-card">
-            <label className="field field-muted">1st Weight<input value={fmtWeight(activeSlip?.firstWeight ?? pendingFirstWeight?.weight)} readOnly /></label>
-            <label className="field field-muted">1st Weight Date<input value={activeSlip?.firstWeighedAt ? fmtDate(activeSlip.firstWeighedAt) : pendingFirstWeight ? fmtDate(pendingFirstWeight.capturedAt) : "-"} readOnly /></label>
+            <label className="field field-muted">1st Weight<input value={fmtWeight(displayedFirstWeight)} readOnly /></label>
+            <label className="field field-muted">1st Weight Date<input value={displayedFirstWeightDate} readOnly /></label>
           </article>
           <article className="wb-card weight-row-card">
-            <label className="field field-muted">2nd Weight<input value={fmtWeight(activeSlip?.finalWeight)} readOnly /></label>
-            <label className="field field-muted">2nd Weight Date<input value={activeSlip?.finalWeighedAt ? fmtDate(activeSlip.finalWeighedAt) : "-"} readOnly /></label>
+            <label className="field field-muted">2nd Weight<input value={fmtWeight(displayedSecondWeight)} readOnly /></label>
+            <label className="field field-muted">2nd Weight Date<input value={displayedSecondWeightDate} readOnly /></label>
           </article>
           <article className="wb-card weight-row-card">
             <label className="field field-muted weight-field-net">Net Weight<input value={fmtWeight(displayedNetWeight)} readOnly /></label>
