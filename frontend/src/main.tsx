@@ -665,6 +665,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
     ?? displayedFirstWeight;
   const activeWeighbridge = data.settings?.weighbridges.find((item) => item.active) || data.settings?.weighbridges[0];
   const shownWeight = livePaused && pausedWeight != null ? pausedWeight : liveWeight.weight;
+  const captureWeightLocked = Boolean(capturedWeight) || isCompletedSlip;
   const filteredSlips = selectableTransactions.filter((item) => {
     const text = `${item.transactionNo} ${item.vehicleNo} ${item.partyName}`.toLowerCase();
     return text.includes(searchTerm.toLowerCase());
@@ -1023,6 +1024,10 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
 
   const captureWeight = async () => {
     setCreateError("");
+    if (capturedWeight) {
+      showWorkflowWarning("Weight Already Captured", "Cancel the entry if you need to capture the weight again.");
+      return;
+    }
     if (isCompletedSlip) {
       showOperatorPopup("Slip Locked", "Completed slips cannot be changed.", "warning");
       return;
@@ -1147,7 +1152,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
             <h2>Weight & Materials</h2>
             <LiveWeight reading={{ ...liveWeight, weight: shownWeight }} compact />
             <div className="weight-tools">
-              <button className="btn-primary" type="button" onClick={captureWeight} disabled={!liveWeight.stable || isCompletedSlip}>Capture Weight</button>
+              <button className="btn-primary" type="button" onClick={captureWeight} disabled={!liveWeight.stable || captureWeightLocked}>{capturedWeight ? "Weight Captured" : "Capture Weight"}</button>
               <button className="btn-secondary" type="button" onClick={() => {
                 if (livePaused) {
                   setLivePaused(false);
