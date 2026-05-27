@@ -540,6 +540,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
   const [newSlipStarted, setNewSlipStarted] = useState(false);
   const [reservedSlipNo, setReservedSlipNo] = useState("");
   const [movementType, setMovementType] = useState<"INBOUND" | "OUTBOUND">("INBOUND");
+  const [transactionMode, setTransactionMode] = useState<TransactionMode>("SINGLE");
   const [entryFormKey, setEntryFormKey] = useState(0);
   const [searchTerm, setSearchTerm] = useState("");
   const [livePaused, setLivePaused] = useState(false);
@@ -561,12 +562,14 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
     remarks: ""
   });
   const activeSlip = activeSlipId ? selectableTransactions.find((item) => item.id === activeSlipId) || null : null;
+  const effectiveTransactionMode = activeSlip?.mode || transactionMode;
   const systemWeighmentType: "FIRST" | "SECOND" = !activeSlip || activeSlip.firstWeight == null ? "FIRST" : "SECOND";
   const shownSlipNo = activeSlip?.transactionNo || (newSlipStarted ? nextSlipNo : "SN-0000000");
   const slipNoIsPlaceholder = !activeSlip && !newSlipStarted;
   const isCompletedSlip = activeSlip?.status === "COMPLETED";
   const lockLoadedSlipDetails = activeSlip?.status === "IN_PROGRESS" || activeSlip?.status === "COMPLETED";
   const lockProductEntry = !activeSlip || activeSlip.firstWeight == null || isCompletedSlip;
+  const canAddIntermediateProduct = effectiveTransactionMode === "MULTIPLE";
   const selectedVehicleId = activeSlip?.vehicleId || draftSelection.vehicleId;
   const selectedPartyId = activeSlip?.partyId || draftSelection.partyId;
   const selectedDriverId = activeSlip?.driverId || draftSelection.driverId;
@@ -627,6 +630,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
     setCapturedWeight(null);
     setCreateError("");
     setMovementType("INBOUND");
+    setTransactionMode("SINGLE");
     setDraftSelection({ vehicleId: "", partyId: "", driverId: "" });
     setProductDraft({
       productId: "",
@@ -695,6 +699,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
     setCapturedWeight(null);
     setCreateError("");
     setMovementType(transaction.movementType || "INBOUND");
+    setTransactionMode(transaction.mode);
     onToast(`Continuing slip ${transaction.transactionNo}`);
   };
 
@@ -733,13 +738,19 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
         onToast(message);
         return;
       }
-      if (activeSlip.productEntries.length === 0) {
+      if (activeSlip.mode === "MULTIPLE" && activeSlip.productEntries.length === 0) {
         const message = "Add product lines before saving 2nd Weight";
         setCreateError(message);
         onToast(message);
         return;
       }
-      const saved = await action(`/api/transactions/${activeSlip.id}/final-weigh`, { weight: capturedWeight.weight, skipCameraCapture: true }, "Second weight saved");
+      if (activeSlip.mode !== "MULTIPLE" && !productDraft.productId) {
+        const message = "Select product before saving 2nd Weight";
+        setCreateError(message);
+        onToast(message);
+        return;
+      }
+      const saved = await action(`/api/transactions/${activeSlip.id}/final-weigh`, { ...productDraft, weight: capturedWeight.weight, skipCameraCapture: true }, "Second weight saved");
       if (saved) setCapturedWeight(null);
       return;
     }
@@ -810,6 +821,12 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
     }
     if (activeSlip.firstWeight == null) {
       const message = "Capture first weight before adding products";
+      setCreateError(message);
+      onToast(message);
+      return;
+    }
+    if (activeSlip.mode !== "MULTIPLE") {
+      const message = "Single product slips use the 2nd Weight as the product line";
       setCreateError(message);
       onToast(message);
       return;
@@ -895,7 +912,6 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
       </header>
 
       <form id="weighment-entry-form" className="weighbridge-workspace" key={`${entryFormKey}-${activeSlip?.id || "new"}`} onSubmit={saveSlip}>
-        <input type="hidden" name="mode" value="MULTIPLE" />
         {data.settings?.slipShiftVisible ? null : <input type="hidden" name="shift" value={activeSlip?.shift || "Day"} />}
         {data.settings?.slipWeighbridgeNodeVisible ? null : <input type="hidden" name="weighbridgeId" value={activeSlip?.weighbridgeId || activeWeighbridge?.id || ""} />}
 
@@ -925,6 +941,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
                 setCapturedWeight(null);
                 setCreateError("");
                 setMovementType(selectedSlip?.movementType || "INBOUND");
+                setTransactionMode(selectedSlip?.mode || "SINGLE");
               }}>
                 <option value=""></option>
                 {filteredSlips.map((item) => (
@@ -936,6 +953,10 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
               <label className="field">Movement<select name="movementType" value={shownMovementType} onChange={(event) => setMovementType(event.target.value as "INBOUND" | "OUTBOUND")} disabled={lockLoadedSlipDetails}>
                 <option value="INBOUND">Inbound</option>
                 <option value="OUTBOUND">Outbound</option>
+              </select></label>
+              <label className="field">Product Workflow<select name="mode" value={effectiveTransactionMode} onChange={(event) => setTransactionMode(event.target.value as TransactionMode)} disabled={Boolean(activeSlip)}>
+                <option value="SINGLE">Single product</option>
+                <option value="MULTIPLE">Multiple products</option>
               </select></label>
               <label className="field wb-span-2 field-muted">Weighment Type<input value={systemWeighmentType === "FIRST" ? "1st Weight" : "2nd Weight"} readOnly /></label>
               {data.settings?.slipShiftVisible && (
@@ -1035,7 +1056,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
           <article className="wb-card material-card">
             <div className="wb-card-head">
               <h2>Material/Product</h2>
-              <button className="btn-secondary" type="button" onClick={captureProduct} disabled={lockProductEntry || !can(data.user, "CAPTURE_PRODUCT_WEIGHT")}>Add Product Line</button>
+              <button className="btn-secondary" type="button" onClick={captureProduct} disabled={lockProductEntry || !canAddIntermediateProduct || !can(data.user, "CAPTURE_PRODUCT_WEIGHT")}>Add Product Line</button>
             </div>
             <div className="product-line-form">
               <label className="field">Material/Product<select value={productDraft.productId} onChange={(event) => {

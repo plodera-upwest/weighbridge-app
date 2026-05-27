@@ -315,6 +315,31 @@ function denyHistoricalMutation(_req: Request, res: Response) {
   });
 }
 
+function productEntryFromFinalWeight(transaction: { firstWeight: number | null; finalWeight: number | null; productEntries: ProductEntry[] }, product: Product, body: Record<string, unknown>, operatorName: string) {
+  if (transaction.firstWeight == null || transaction.finalWeight == null) throw new Error("First and second weights are required");
+  const packageCount = Number(body.packageCount || 0);
+  const tareWeight = Number(body.tareWeight || 0);
+  const packingTare = Number(body.packingTare || 0);
+  const productWeight = Math.abs(transaction.finalWeight - transaction.firstWeight);
+  return {
+    id: uid("pwe"),
+    productId: product.id,
+    productName: product.name,
+    unit: text(body.unit, product.unit),
+    packageCount,
+    tareWeight,
+    packingMode: text(body.packingMode, "Single product"),
+    packingTare,
+    sequence: transaction.productEntries.length + 1,
+    grossWeight: transaction.finalWeight,
+    previousWeight: transaction.firstWeight,
+    productWeight,
+    remarks: text(body.remarks),
+    capturedAt: new Date().toISOString(),
+    operatorName
+  };
+}
+
 app.post("/api/auth/login", (req, res, next) => {
   const db = readDb();
   try {
@@ -597,6 +622,7 @@ app.post("/api/transactions/:id/product-weigh", auth, permit("CAPTURE_PRODUCT_WE
   if (!transaction || !product) throw new Error("Transaction and product are required");
   if (transaction.firstWeight == null) throw new Error("Capture first weigh before product weighing");
   if (transaction.status !== "IN_PROGRESS" || transaction.finalWeight != null) throw new Error("Saved transaction history cannot be edited");
+  if (transaction.mode !== "MULTIPLE") throw new Error("Single product slips use the 2nd Weight as the product line");
 
   const grossWeight = weight(req.body.weight);
   const previousWeight = transaction.productEntries.at(-1)?.grossWeight ?? transaction.firstWeight;
@@ -638,10 +664,15 @@ app.post("/api/transactions/:id/final-weigh", auth, permit("CAPTURE_FINAL_WEIGHT
     if (transaction.firstWeight == null) throw new Error("First weigh is required");
     if (transaction.finalWeight != null || transaction.status === "COMPLETED") throw new Error("Second weight already captured");
     if (transaction.status !== "IN_PROGRESS") throw new Error("Only in-progress slips can be completed");
-    if (transaction.productEntries.length === 0) throw new Error("Add at least one product line before second weigh");
     transaction.finalWeight = weight(req.body.weight);
     transaction.netWeight = Math.abs(transaction.finalWeight - transaction.firstWeight);
     transaction.finalWeighedAt = new Date().toISOString();
+    if (transaction.mode === "SINGLE" && transaction.productEntries.length === 0) {
+      const product = db.products.find((item) => item.id === text(req.body.productId));
+      if (!product) throw new Error("Select product before saving 2nd Weight");
+      transaction.productEntries.push(productEntryFromFinalWeight(transaction, product, req.body, req.user!.name));
+    }
+    if (transaction.mode === "MULTIPLE" && transaction.productEntries.length === 0) throw new Error("Add at least one product line before second weigh");
     transaction.status = "COMPLETED";
     if (!bool(req.body.skipCameraCapture, false)) {
       transaction.cameraImages.push(...await captureCameras(db.settings, "FINAL"));
