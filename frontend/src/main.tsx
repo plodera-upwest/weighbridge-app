@@ -677,11 +677,12 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
   const vehicleCompletedSlips = vehicleSlips.filter((item) => item.status === "COMPLETED").slice(0, 3);
 
   useEffect(() => {
+    if (isCreating) return;
     if (!selectedVehicleId || activeSlip || vehicleOpenSlips.length === 0) return;
     if (lastVehiclePopupId === selectedVehicleId) return;
     setVehicleSlipPopupOpen(true);
     setLastVehiclePopupId(selectedVehicleId);
-  }, [selectedVehicleId, activeSlip?.id, vehicleOpenSlips.length, lastVehiclePopupId]);
+  }, [selectedVehicleId, activeSlip?.id, vehicleOpenSlips.length, lastVehiclePopupId, isCreating]);
 
   useEffect(() => {
     api<{ slipNo: string; mode: Settings["slipNumberMode"] }>("/api/transactions/next-slip-no")
