@@ -85,6 +85,9 @@ export type Transaction = {
   netWeight: number | null;
   firstWeighedAt: string | null;
   finalWeighedAt: string | null;
+  plannedProductId?: string;
+  plannedProductName?: string;
+  plannedUnit?: string;
   productEntries: ProductEntry[];
   cameraImages: CameraImage[];
   operatorId: string;

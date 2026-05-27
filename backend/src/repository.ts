@@ -297,6 +297,9 @@ export function readDb(): Db {
       weighbridgeName?: string;
       firstWeighedAt?: string | null;
       finalWeighedAt?: string | null;
+      plannedProductId?: string;
+      plannedProductName?: string;
+      plannedUnit?: string;
     };
     const activeWeighbridgeForSlip = db.settings.weighbridges.find((item) => item.active) || db.settings.weighbridges[0];
     if (typeof migratedTransaction.destination !== "string") {
@@ -325,6 +328,18 @@ export function readDb(): Db {
     }
     if (migratedTransaction.finalWeighedAt === undefined) {
       migratedTransaction.finalWeighedAt = transaction.finalWeight == null ? null : transaction.updatedAt;
+      changed = true;
+    }
+    if (typeof migratedTransaction.plannedProductId !== "string") {
+      migratedTransaction.plannedProductId = "";
+      changed = true;
+    }
+    if (typeof migratedTransaction.plannedProductName !== "string") {
+      migratedTransaction.plannedProductName = "";
+      changed = true;
+    }
+    if (typeof migratedTransaction.plannedUnit !== "string") {
+      migratedTransaction.plannedUnit = "";
       changed = true;
     }
     for (const entry of transaction.productEntries) {

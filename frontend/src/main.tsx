@@ -104,6 +104,9 @@ type Transaction = {
   netWeight: number | null;
   firstWeighedAt: string | null;
   finalWeighedAt: string | null;
+  plannedProductId?: string;
+  plannedProductName?: string;
+  plannedUnit?: string;
   productEntries: ProductEntry[];
   cameraImages: CameraImage[];
   operatorName: string;
@@ -643,7 +646,8 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
   const slipNoIsPlaceholder = !activeSlip && !newSlipStarted;
   const isCompletedSlip = activeSlip?.status === "COMPLETED";
   const lockLoadedSlipDetails = activeSlip?.status === "IN_PROGRESS" || activeSlip?.status === "COMPLETED";
-  const lockProductEntry = !activeSlip || activeSlip.firstWeight == null || isCompletedSlip;
+  const lockProductSelection = isCompletedSlip || (activeSlip ? activeSlip.firstWeight == null : !newSlipStarted);
+  const lockProductLineAction = !activeSlip || activeSlip.firstWeight == null || isCompletedSlip;
   const canAddIntermediateProduct = effectiveTransactionMode === "MULTIPLE";
   const selectedVehicleId = activeSlip?.vehicleId || draftSelection.vehicleId;
   const selectedPartyId = activeSlip?.partyId || draftSelection.partyId;
@@ -702,6 +706,16 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
       unit: current.unit || data.products.find((product) => product.id === current.productId)?.unit || ""
     }));
   }, [data.products]);
+
+  useEffect(() => {
+    if (!activeSlip || activeSlip.productEntries.length > 0 || !activeSlip.plannedProductId) return;
+    const plannedProduct = data.products.find((product) => product.id === activeSlip.plannedProductId);
+    setProductDraft((current) => ({
+      ...current,
+      productId: activeSlip.plannedProductId || current.productId,
+      unit: activeSlip.plannedUnit || plannedProduct?.unit || current.unit
+    }));
+  }, [activeSlip?.id, activeSlip?.plannedProductId, activeSlip?.plannedUnit, activeSlip?.productEntries.length, data.products]);
 
   const resetEntry = async (voidReserved = true) => {
     if (voidReserved && reservedSlipNo) {
@@ -877,12 +891,16 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
       if (saved) setCapturedWeight(null);
       return;
     }
-    if (!capturedWeight) {
-      showWorkflowWarning("Capture Weight First", "Capture weight first to save.");
-      return;
-    }
     if (!newSlipStarted) {
       showWorkflowWarning("New Slip Required", "Click New Slip before saving a new slip.");
+      return;
+    }
+    if (!productDraft.productId) {
+      showWorkflowWarning("Product Required", "Please select a product before saving this slip.");
+      return;
+    }
+    if (!capturedWeight) {
+      showWorkflowWarning("Capture Weight First", "Capture weight first to save.");
       return;
     }
     const capturedFirstWeight = capturedWeight;
@@ -893,6 +911,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
         method: "POST",
         body: JSON.stringify({
           ...formObject(form),
+          ...productDraft,
           reservedSlipNo,
           captureInitialWeight: true,
           initialWeight: capturedFirstWeight.weight
@@ -1143,17 +1162,17 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
           <article className="wb-card material-card">
             <div className="wb-card-head">
               <h2>Material/Product</h2>
-              <button className="btn-secondary" type="button" onClick={captureProduct} disabled={lockProductEntry || !canAddIntermediateProduct || !can(data.user, "CAPTURE_PRODUCT_WEIGHT")}>Add Product Line</button>
+              <button className="btn-secondary" type="button" onClick={captureProduct} disabled={lockProductLineAction || !canAddIntermediateProduct || !can(data.user, "CAPTURE_PRODUCT_WEIGHT")}>Add Product Line</button>
             </div>
             <div className="product-line-form">
               <label className="field">Material/Product<select value={productDraft.productId} onChange={(event) => {
                 const product = data.products.find((item) => item.id === event.target.value);
                 setProductDraft((current) => ({ ...current, productId: event.target.value, unit: product?.unit || "" }));
-              }} disabled={lockProductEntry}><option value="">Select product</option>{data.products.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-              <label className="field">Pkgs<input type="number" value={productDraft.packageCount} onChange={(event) => setProductDraft((current) => ({ ...current, packageCount: Number(event.target.value) }))} disabled={lockProductEntry} /></label>
-              <label className="field">Unit<input value={productDraft.unit || selectedProduct?.unit || "kg"} onChange={(event) => setProductDraft((current) => ({ ...current, unit: event.target.value }))} disabled={lockProductEntry} /></label>
-              <label className="field">Tare<input type="number" value={productDraft.tareWeight} onChange={(event) => setProductDraft((current) => ({ ...current, tareWeight: Number(event.target.value) }))} disabled={lockProductEntry} /></label>
-              <label className="field">Packing Tare<input type="number" value={productDraft.packingTare} onChange={(event) => setProductDraft((current) => ({ ...current, packingTare: Number(event.target.value) }))} disabled={lockProductEntry} /></label>
+              }} disabled={lockProductSelection}><option value="">Select product</option>{data.products.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+              <label className="field">Pkgs<input type="number" value={productDraft.packageCount} onChange={(event) => setProductDraft((current) => ({ ...current, packageCount: Number(event.target.value) }))} disabled={lockProductSelection} /></label>
+              <label className="field">Unit<input value={productDraft.unit || selectedProduct?.unit || "kg"} onChange={(event) => setProductDraft((current) => ({ ...current, unit: event.target.value }))} disabled={lockProductSelection} /></label>
+              <label className="field">Tare<input type="number" value={productDraft.tareWeight} onChange={(event) => setProductDraft((current) => ({ ...current, tareWeight: Number(event.target.value) }))} disabled={lockProductSelection} /></label>
+              <label className="field">Packing Tare<input type="number" value={productDraft.packingTare} onChange={(event) => setProductDraft((current) => ({ ...current, packingTare: Number(event.target.value) }))} disabled={lockProductSelection} /></label>
             </div>
             <div className="compact-table-wrap">
               <table className="mini-table">

@@ -567,7 +567,9 @@ app.post("/api/transactions", auth, permit("CREATE_TRANSACTION"), async (req: Au
     const vehicle = db.vehicles.find((item) => item.id === text(req.body.vehicleId));
     const driver = db.drivers.find((item) => item.id === text(req.body.driverId));
     const party = db.parties.find((item) => item.id === text(req.body.partyId));
+    const plannedProduct = db.products.find((item) => item.id === text(req.body.productId));
     if (!vehicle || !driver || !party) throw new Error("Vehicle, driver, and customer/supplier are required");
+    if (!plannedProduct) throw new Error("Select product before saving the slip");
     if (!bool(req.body.captureInitialWeight, false)) throw new Error("Capture weight before saving the slip");
     const weighbridge = db.settings.weighbridges.find((item) => item.id === text(req.body.weighbridgeId)) || db.settings.weighbridges.find((item) => item.active) || db.settings.weighbridges[0];
     const capturedAt = new Date().toISOString();
@@ -602,6 +604,9 @@ app.post("/api/transactions", auth, permit("CREATE_TRANSACTION"), async (req: Au
       netWeight: null,
       firstWeighedAt: capturedAt,
       finalWeighedAt: null,
+      plannedProductId: plannedProduct.id,
+      plannedProductName: plannedProduct.name,
+      plannedUnit: text(req.body.unit, plannedProduct.unit),
       productEntries: [],
       cameraImages: await captureCameras(db.settings, "FIRST"),
       operatorId: req.user!.id,
@@ -700,9 +705,9 @@ app.post("/api/transactions/:id/final-weigh", auth, permit("CAPTURE_FINAL_WEIGHT
     transaction.netWeight = Math.abs(transaction.finalWeight - transaction.firstWeight);
     transaction.finalWeighedAt = new Date().toISOString();
     if (transaction.mode === "SINGLE" && transaction.productEntries.length === 0) {
-      const product = db.products.find((item) => item.id === text(req.body.productId));
+      const product = db.products.find((item) => item.id === text(req.body.productId, transaction.plannedProductId || ""));
       if (!product) throw new Error("Select product before saving 2nd Weight");
-      transaction.productEntries.push(productEntryFromFinalWeight(transaction, product, req.body, req.user!.name));
+      transaction.productEntries.push(productEntryFromFinalWeight(transaction, product, { ...req.body, unit: text(req.body.unit, transaction.plannedUnit || product.unit) }, req.user!.name));
     }
     if (transaction.mode === "MULTIPLE" && transaction.productEntries.length === 0) throw new Error("Add at least one product line before second weigh");
     transaction.status = "COMPLETED";
