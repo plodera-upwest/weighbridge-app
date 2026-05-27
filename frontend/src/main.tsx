@@ -842,6 +842,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
   };
 
   const showOperatorPopup = (title: string, message: string, tone: "success" | "warning" | "error" = "warning") => {
+    onToast("");
     setOperatorPopup({ title, message, tone });
   };
 
