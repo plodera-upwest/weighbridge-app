@@ -581,7 +581,7 @@ app.post("/api/transactions", auth, permit("CREATE_TRANSACTION"), async (req: Au
     if (!transporter) throw new Error("Transporter is required");
     if (!driverIdentity) throw new Error("Driver ID is required");
     if (!destination) throw new Error(movementType === "INBOUND" ? "Receiving location is required" : "Destination is required");
-    if (!plannedProduct) throw new Error("Select product before saving the slip");
+    if (movementType === "INBOUND" && !plannedProduct) throw new Error("Select product before saving the slip");
     if (!bool(req.body.captureInitialWeight, false)) throw new Error("Capture weight before saving the slip");
     const weighbridge = db.settings.weighbridges.find((item) => item.id === text(req.body.weighbridgeId)) || db.settings.weighbridges.find((item) => item.active) || db.settings.weighbridges[0];
     const capturedAt = new Date().toISOString();
@@ -616,9 +616,9 @@ app.post("/api/transactions", auth, permit("CREATE_TRANSACTION"), async (req: Au
       netWeight: null,
       firstWeighedAt: capturedAt,
       finalWeighedAt: null,
-      plannedProductId: plannedProduct.id,
-      plannedProductName: plannedProduct.name,
-      plannedUnit: text(req.body.unit, plannedProduct.unit),
+      plannedProductId: plannedProduct?.id || "",
+      plannedProductName: plannedProduct?.name || "",
+      plannedUnit: plannedProduct ? text(req.body.unit, plannedProduct.unit) : text(req.body.unit),
       productEntries: [],
       cameraImages: await captureCameras(db.settings, "FIRST"),
       operatorId: req.user!.id,
@@ -646,7 +646,7 @@ app.post("/api/transactions/:id/first-weigh", auth, permit("CAPTURE_FIRST_WEIGHT
     const transaction = db.transactions.find((item) => item.id === req.params.id);
     if (!transaction) throw new Error("Transaction not found");
     if (transaction.firstWeight != null) throw new Error("First weight already captured");
-    if (!transaction.plannedProductId) throw new Error("Select product before saving the slip");
+    if ((transaction.movementType || "INBOUND") === "INBOUND" && !transaction.plannedProductId) throw new Error("Select product before saving the slip");
     if (transaction.productEntries.length > 0 || transaction.finalWeight != null || transaction.status === "COMPLETED") {
       throw new Error("Saved transaction history cannot be edited");
     }

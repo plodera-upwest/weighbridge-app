@@ -897,7 +897,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
           showWorkflowWarning("Product Required", "Add product lines before saving 2nd Weight.");
           return;
         }
-        if (!activeSlip.plannedProductId && !productDraft.productId) {
+        if ((activeSlip.movementType || "INBOUND") === "INBOUND" && !activeSlip.plannedProductId && !productDraft.productId) {
           showWorkflowWarning("Product Required", "Please select a product before saving this slip.");
           return;
         }
@@ -1119,7 +1119,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
       { key: "driverId", ok: Boolean(selectedDriverId), title: "Driver Name Required", message: "Please select driver name before saving." },
       { key: "driverIdentity", ok: Boolean(driverIdentity), title: "Driver ID Required", message: "Please enter driver ID before saving." },
       { key: "destination", ok: Boolean(destination), title: `${locationName} Required`, message: `Please enter ${locationName.toLowerCase()} before saving.` },
-      { key: "productId", ok: Boolean(productDraft.productId), title: "Product Required", message: "Please select a product before saving this slip." }
+      { key: "productId", ok: movement === "OUTBOUND" || Boolean(productDraft.productId), title: "Product Required", message: "Please select a product before saving this slip." }
     ];
     const missing = checks.find((item) => !item.ok);
     if (missing) {
