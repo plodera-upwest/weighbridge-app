@@ -576,6 +576,8 @@ app.post("/api/transactions", auth, permit("CREATE_TRANSACTION"), async (req: Au
     if (movementType !== "INBOUND" && movementType !== "OUTBOUND") throw new Error("Movement is required");
     if (mode !== "SINGLE" && mode !== "MULTIPLE") throw new Error("Product workflow is required");
     if (!vehicle || !driver || !party) throw new Error("Vehicle, driver, and customer/supplier are required");
+    const existingOpenSlip = db.transactions.find((item) => item.vehicleId === vehicle.id && item.status !== "COMPLETED" && item.status !== "CANCELLED");
+    if (existingOpenSlip) throw new Error(`Vehicle already has open slip ${existingOpenSlip.transactionNo}. Continue the existing slip before creating another one.`);
     if (!transporter) throw new Error("Transporter is required");
     if (!driverIdentity) throw new Error("Driver ID is required");
     if (!destination) throw new Error(movementType === "INBOUND" ? "Receiving location is required" : "Destination is required");

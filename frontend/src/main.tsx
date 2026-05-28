@@ -678,6 +678,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
     : [];
   const vehicleOpenSlips = vehicleSlips.filter((item) => item.status !== "COMPLETED");
   const vehicleCompletedSlips = vehicleSlips.filter((item) => item.status === "COMPLETED").slice(0, 3);
+  const blockingOpenSlip = !activeSlip && newSlipStarted ? vehicleOpenSlips[0] : null;
 
   useEffect(() => {
     if (isCreating) return;
@@ -1040,6 +1041,11 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
       showWorkflowWarning("New Slip Required", "Click New Slip before capturing weight.");
       return;
     }
+    if (blockingOpenSlip) {
+      setVehicleSlipPopupOpen(true);
+      showWorkflowWarning("Open Slip Exists", `Vehicle already has open slip ${blockingOpenSlip.transactionNo}. Continue the existing slip before creating another one.`);
+      return;
+    }
     if (!liveWeight.stable) {
       showWorkflowWarning("Stable Weight Required", "Wait for stable weight before capturing.");
       return;
@@ -1106,6 +1112,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
       { key: "movementType", ok: Boolean(movement), title: "Movement Required", message: "Please select movement before saving." },
       { key: "mode", ok: Boolean(mode), title: "Product Workflow Required", message: "Please select product workflow before saving." },
       { key: "vehicleId", ok: Boolean(selectedVehicleId), title: "Vehicle No Required", message: "Please select vehicle number before saving." },
+      { key: "vehicleId", ok: !blockingOpenSlip, title: "Open Slip Exists", message: `Vehicle already has open slip ${blockingOpenSlip?.transactionNo}. Continue the existing slip before creating another one.` },
       { key: "partyId", ok: Boolean(selectedPartyId), title: "Customer Required", message: "Please select customer before saving." },
       { key: "transporter", ok: Boolean(transporter), title: "Transporter Required", message: "Please enter transporter before saving." },
       { key: "driverId", ok: Boolean(selectedDriverId), title: "Driver Name Required", message: "Please select driver name before saving." },
@@ -1194,7 +1201,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
             </div>
             {!activeSlip && selectedVehicleId && vehicleOpenSlips.length > 0 && (
               <div className="vehicle-slip-hint">
-                <span>{vehicleOpenSlips.length} open slip{vehicleOpenSlips.length === 1 ? "" : "s"} found for this vehicle</span>
+                <span>Open slip exists for this vehicle. Continue it before creating a new slip.</span>
                 <button className="btn-secondary" type="button" onClick={() => setVehicleSlipPopupOpen(true)}>View</button>
               </div>
             )}
