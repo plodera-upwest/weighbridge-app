@@ -1319,7 +1319,7 @@ function OperatorPopup({ title, message, tone, onClose }: { title: string; messa
 }
 
 function DirectSlipConfirmPopup({ transaction, onClose, onContinue }: { transaction: Transaction; onClose: () => void; onContinue: (transaction: Transaction) => void }) {
-  const nextStep = transaction.firstWeight == null ? "1st Weight" : "2nd Weight";
+  const weightSummary = transaction.firstWeight == null ? "Waiting for 1st Weight" : `1st Weight ${fmtWeight(transaction.firstWeight)}`;
   return (
     <div className="vehicle-slip-popup-backdrop" onMouseDown={onClose}>
       <section className="vehicle-slip-popup" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label={`Continue slip ${transaction.transactionNo}`}>
@@ -1333,7 +1333,7 @@ function DirectSlipConfirmPopup({ transaction, onClose, onContinue }: { transact
             <div>
               <strong>{transaction.transactionNo}</strong>
               <span>{transaction.vehicleNo} | {transaction.partyName} | {(transaction.movementType || "INBOUND").toLowerCase()}</span>
-              <small>{nextStep} | {fmtWeight(transaction.firstWeight)} | {fmtDate(transaction.firstWeighedAt || transaction.createdAt)} | {transaction.status.replaceAll("_", " ")}</small>
+              <small>{weightSummary} | {fmtDate(transaction.firstWeighedAt || transaction.createdAt)} | {transaction.status.replaceAll("_", " ")}</small>
             </div>
             <button className="btn-primary" type="button" onClick={() => onContinue(transaction)}>Continue Slip</button>
           </article>
