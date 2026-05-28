@@ -903,8 +903,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
         }
         const saved = await action(`/api/transactions/${activeSlip.id}/first-weigh`, { weight: capturedWeight.weight, skipCameraCapture: true }, "1st weight saved successfully.", "Saved", "success");
         if (saved) {
-          setCapturedWeight(null);
-          setPendingFirstWeight(null);
+          await resetEntry(false);
         }
         return;
       }
@@ -921,7 +920,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
         return;
       }
       const saved = await action(`/api/transactions/${activeSlip.id}/final-weigh`, { ...productDraft, weight: capturedWeight.weight, skipCameraCapture: true }, "2nd weight saved and slip completed successfully.", "Saved", "success");
-      if (saved) setCapturedWeight(null);
+      if (saved) await resetEntry(false);
       return;
     }
     if (!newSlipStarted) {
@@ -1019,12 +1018,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
     const productName = data.products.find((item) => item.id === productDraft.productId)?.name || "Product";
     const captured = await action(`/api/transactions/${activeSlip.id}/product-weigh`, { ...productDraft, weight: capturedWeight.weight }, `${productName} product line saved successfully.`, "Product Saved", "success");
     if (captured) {
-      setCapturedWeight(null);
-      setProductDraft((current) => ({
-        ...current,
-        productId: "",
-        unit: ""
-      }));
+      await resetEntry(false);
     }
   };
 
