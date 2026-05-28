@@ -1288,12 +1288,6 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
               </table>
             </div>
           </article>
-          {createError && (
-            <div className="slip-action-error" role="alert">
-              <span>{createError}</span>
-              <button type="button" onClick={() => setCreateError("")}>Cancel</button>
-            </div>
-          )}
         </section>
 
         <aside className="wb-card cctv-card">

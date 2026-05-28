@@ -695,38 +695,6 @@
     background: #ffffff;
   }
 
-  .slip-action-error {
-    grid-column: 1 / -1;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    border: 1px solid #fecaca;
-    border-radius: 10px;
-    background: theme("colors.red.50");
-    padding: 8px 10px 8px 12px;
-    color: theme("colors.red.700");
-    font-size: 13px;
-    font-weight: 500;
-  }
-
-  .slip-action-error button {
-    flex: 0 0 auto;
-    min-height: 28px;
-    border: 1px solid #fecaca;
-    border-radius: 8px;
-    background: #ffffff;
-    padding: 4px 10px;
-    color: #991b1b;
-    font-size: 12px;
-    font-weight: 700;
-  }
-
-  .slip-action-error button:hover {
-    border-color: #fca5a5;
-    background: #fff7f7;
-  }
-
   .slip-entry-panel {
     min-height: 0;
     overflow: hidden;
