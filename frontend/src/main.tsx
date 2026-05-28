@@ -895,6 +895,10 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
           showWorkflowWarning("Product Required", "Add product lines before saving 2nd Weight.");
           return;
         }
+        if (!activeSlip.plannedProductId && !productDraft.productId) {
+          showWorkflowWarning("Product Required", "Please select a product before saving this slip.");
+          return;
+        }
         const saved = await action(`/api/transactions/${activeSlip.id}/first-weigh`, { weight: capturedWeight.weight, skipCameraCapture: true }, "1st weight saved successfully.", "Saved", "success");
         if (saved) {
           setCapturedWeight(null);
@@ -1067,6 +1071,15 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
   };
 
   const selectedProduct = data.products.find((item) => item.id === productDraft.productId);
+  const plannedProductPreview = activeSlip && activeSlip.productEntries.length === 0 && activeSlip.plannedProductId
+    ? {
+      productName: activeSlip.plannedProductName || selectedProduct?.name || "Selected product",
+      packageCount: productDraft.packageCount,
+      grossWeight: displayedSecondWeight ?? displayedFirstWeight,
+      productWeight: displayedNetWeight,
+      unit: activeSlip.plannedUnit || productDraft.unit || selectedProduct?.unit || "kg"
+    }
+    : null;
 
   const fieldClass = (key: string, extra = "") => `field ${extra} ${missingFieldKey === key ? "field-required-missing" : ""}`.trim();
 
@@ -1252,7 +1265,17 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
                   {(activeSlip?.productEntries || []).map((entry) => (
                     <tr key={entry.id}><td>{entry.sequence}</td><td>{entry.productName}</td><td>{entry.packageCount}</td><td>{fmtWeight(entry.grossWeight)}</td><td>{fmtWeight(entry.productWeight)}</td><td>{entry.unit}</td></tr>
                   ))}
-                  {!activeSlip?.productEntries.length && <tr><td colSpan={6}>No product lines captured yet.</td></tr>}
+                  {plannedProductPreview && (
+                    <tr>
+                      <td>1</td>
+                      <td>{plannedProductPreview.productName}</td>
+                      <td>{plannedProductPreview.packageCount}</td>
+                      <td>{fmtWeight(plannedProductPreview.grossWeight)}</td>
+                      <td>{fmtWeight(plannedProductPreview.productWeight)}</td>
+                      <td>{plannedProductPreview.unit}</td>
+                    </tr>
+                  )}
+                  {!activeSlip?.productEntries.length && !plannedProductPreview && <tr><td colSpan={6}>No product selected yet.</td></tr>}
                 </tbody>
               </table>
             </div>

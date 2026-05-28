@@ -644,6 +644,7 @@ app.post("/api/transactions/:id/first-weigh", auth, permit("CAPTURE_FIRST_WEIGHT
     const transaction = db.transactions.find((item) => item.id === req.params.id);
     if (!transaction) throw new Error("Transaction not found");
     if (transaction.firstWeight != null) throw new Error("First weight already captured");
+    if (!transaction.plannedProductId) throw new Error("Select product before saving the slip");
     if (transaction.productEntries.length > 0 || transaction.finalWeight != null || transaction.status === "COMPLETED") {
       throw new Error("Saved transaction history cannot be edited");
     }
