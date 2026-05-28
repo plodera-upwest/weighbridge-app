@@ -651,6 +651,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
   const lockProductSelection = isCompletedSlip || (activeSlip ? activeSlip.firstWeight == null : !newSlipStarted);
   const lockProductLineAction = !activeSlip || activeSlip.firstWeight == null || isCompletedSlip;
   const canAddIntermediateProduct = effectiveTransactionMode === "MULTIPLE";
+  const productLineReady = Boolean(activeSlip && activeSlip.mode === "MULTIPLE" && activeSlip.firstWeight != null && capturedWeight && productDraft.productId && !isCompletedSlip);
   const selectedVehicleId = activeSlip?.vehicleId || draftSelection.vehicleId;
   const selectedPartyId = activeSlip?.partyId || draftSelection.partyId;
   const selectedDriverId = activeSlip?.driverId || draftSelection.driverId;
@@ -1245,7 +1246,7 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
           <article className="wb-card material-card">
             <div className="wb-card-head">
               <h2>Material/Product</h2>
-              <button className="btn-secondary" type="button" onClick={captureProduct} disabled={lockProductLineAction || !canAddIntermediateProduct || !can(data.user, "CAPTURE_PRODUCT_WEIGHT")}>Add Product Line</button>
+              <button className={`btn-secondary ${productLineReady ? "btn-product-ready" : ""}`} type="button" onClick={captureProduct} disabled={lockProductLineAction || !canAddIntermediateProduct || !can(data.user, "CAPTURE_PRODUCT_WEIGHT")}>Add Product Line</button>
             </div>
             <div className="product-line-form">
               <label className={fieldClass("productId")} data-required-key="productId">Material/Product<select value={productDraft.productId} onChange={(event) => {

@@ -63,6 +63,19 @@
     transform: translateY(1px);
   }
 
+  .btn-product-ready {
+    border-color: #059669 !important;
+    background: #059669 !important;
+    color: #ffffff !important;
+    box-shadow: 0 10px 22px rgba(5, 150, 105, 0.24);
+  }
+
+  .btn-product-ready:hover {
+    border-color: #047857 !important;
+    background: #047857 !important;
+    color: #ffffff !important;
+  }
+
   .btn-danger {
     @apply min-h-10 border border-red-200 bg-red-50 px-4 py-2 font-medium text-red-700 hover:border-red-400 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50;
     border-radius: 12px;
