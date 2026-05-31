@@ -83,6 +83,16 @@ const settings: Settings = {
   slipShiftVisible: false,
   slipSelectVehicleVisible: false,
   slipSearchControlsVisible: false,
+  aiProductCounting: {
+    enabled: false,
+    serviceUrl: "http://127.0.0.1:5055",
+    cameraId: "cam-rear",
+    countingMode: "LINE_CROSSING",
+    productType: "Bags / cartons / crates",
+    confidenceThreshold: 70,
+    requireOperatorConfirmation: true,
+    attachSnapshotToSlip: true
+  },
   device: {
     connectionType: "simulator",
     comPort: "COM1",
@@ -196,6 +206,54 @@ export function readDb(): Db {
   if (typeof db.settings.slipSearchControlsVisible !== "boolean") {
     db.settings.slipSearchControlsVisible = false;
     changed = true;
+  }
+
+  const migratedAiCounting = db.settings.aiProductCounting as Settings["aiProductCounting"] | undefined;
+  if (!migratedAiCounting || typeof migratedAiCounting !== "object") {
+    db.settings.aiProductCounting = {
+      enabled: false,
+      serviceUrl: "http://127.0.0.1:5055",
+      cameraId: db.settings.cameras[0]?.id || "",
+      countingMode: "LINE_CROSSING",
+      productType: "Bags / cartons / crates",
+      confidenceThreshold: 70,
+      requireOperatorConfirmation: true,
+      attachSnapshotToSlip: true
+    };
+    changed = true;
+  } else {
+    if (typeof migratedAiCounting.enabled !== "boolean") {
+      migratedAiCounting.enabled = false;
+      changed = true;
+    }
+    if (typeof migratedAiCounting.serviceUrl !== "string") {
+      migratedAiCounting.serviceUrl = "http://127.0.0.1:5055";
+      changed = true;
+    }
+    if (typeof migratedAiCounting.cameraId !== "string") {
+      migratedAiCounting.cameraId = db.settings.cameras[0]?.id || "";
+      changed = true;
+    }
+    if (!["LINE_CROSSING", "ZONE_OCCUPANCY", "MANUAL_REVIEW"].includes(migratedAiCounting.countingMode)) {
+      migratedAiCounting.countingMode = "LINE_CROSSING";
+      changed = true;
+    }
+    if (typeof migratedAiCounting.productType !== "string") {
+      migratedAiCounting.productType = "Bags / cartons / crates";
+      changed = true;
+    }
+    if (!Number.isFinite(migratedAiCounting.confidenceThreshold)) {
+      migratedAiCounting.confidenceThreshold = 70;
+      changed = true;
+    }
+    if (typeof migratedAiCounting.requireOperatorConfirmation !== "boolean") {
+      migratedAiCounting.requireOperatorConfirmation = true;
+      changed = true;
+    }
+    if (typeof migratedAiCounting.attachSnapshotToSlip !== "boolean") {
+      migratedAiCounting.attachSnapshotToSlip = true;
+      changed = true;
+    }
   }
 
   if (!db.settings.slipTemplate || !Array.isArray(db.settings.slipTemplate.elements)) {

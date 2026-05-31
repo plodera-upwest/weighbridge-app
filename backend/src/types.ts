@@ -119,6 +119,16 @@ export type Settings = {
   slipShiftVisible: boolean;
   slipSelectVehicleVisible: boolean;
   slipSearchControlsVisible: boolean;
+  aiProductCounting: {
+    enabled: boolean;
+    serviceUrl: string;
+    cameraId: string;
+    countingMode: "LINE_CROSSING" | "ZONE_OCCUPANCY" | "MANUAL_REVIEW";
+    productType: string;
+    confidenceThreshold: number;
+    requireOperatorConfirmation: boolean;
+    attachSnapshotToSlip: boolean;
+  };
   device: {
     connectionType: "serial" | "tcp" | "simulator";
     comPort: string;

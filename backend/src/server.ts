@@ -172,6 +172,26 @@ function connectionType(value: unknown): "serial" | "tcp" | "simulator" {
   return value === "serial" || value === "tcp" ? value : "simulator";
 }
 
+function aiCountingMode(value: unknown): Settings["aiProductCounting"]["countingMode"] {
+  return value === "ZONE_OCCUPANCY" || value === "MANUAL_REVIEW" ? value : "LINE_CROSSING";
+}
+
+function normalizeAiProductCounting(input: unknown, existing: Settings["aiProductCounting"], cameras: Settings["cameras"]) {
+  const value = input && typeof input === "object" ? input as Record<string, unknown> : {};
+  const confidenceThreshold = Math.max(1, Math.min(99, Number(value.confidenceThreshold ?? existing.confidenceThreshold ?? 70)));
+  const cameraId = text(value.cameraId, existing.cameraId || cameras[0]?.id || "");
+  return {
+    enabled: bool(value.enabled, existing.enabled),
+    serviceUrl: text(value.serviceUrl, existing.serviceUrl || "http://127.0.0.1:5055"),
+    cameraId,
+    countingMode: aiCountingMode(value.countingMode ?? existing.countingMode),
+    productType: text(value.productType, existing.productType || "Bags / cartons / crates"),
+    confidenceThreshold,
+    requireOperatorConfirmation: bool(value.requireOperatorConfirmation, existing.requireOperatorConfirmation),
+    attachSnapshotToSlip: bool(value.attachSnapshotToSlip, existing.attachSnapshotToSlip)
+  };
+}
+
 function normalizeWeighbridges(input: unknown, existing: Settings["weighbridges"], fallbackDevice: Settings["device"]) {
   if (!Array.isArray(input)) return existing;
   return input.map((item, index) => {
@@ -849,6 +869,7 @@ app.patch("/api/settings", auth, permit("CHANGE_SETTINGS"), (req: AuthedRequest,
   db.settings.slipShiftVisible = bool(req.body.slipShiftVisible, db.settings.slipShiftVisible);
   db.settings.slipSelectVehicleVisible = bool(req.body.slipSelectVehicleVisible, db.settings.slipSelectVehicleVisible);
   db.settings.slipSearchControlsVisible = bool(req.body.slipSearchControlsVisible, db.settings.slipSearchControlsVisible);
+  db.settings.aiProductCounting = normalizeAiProductCounting(req.body.aiProductCounting, db.settings.aiProductCounting, db.settings.cameras);
   db.settings.device = {
     ...db.settings.device,
     connectionType: connectionType(req.body.connectionType ?? db.settings.device.connectionType),

@@ -59,6 +59,16 @@ type CameraSetting = {
   active: boolean;
 };
 type CameraImage = { id: string; cameraId: string; cameraName: string; weighmentType: "FIRST" | "FINAL"; position: CameraPosition; imageUrl: string; capturedAt: string };
+type AiProductCountingSettings = {
+  enabled: boolean;
+  serviceUrl: string;
+  cameraId: string;
+  countingMode: "LINE_CROSSING" | "ZONE_OCCUPANCY" | "MANUAL_REVIEW";
+  productType: string;
+  confidenceThreshold: number;
+  requireOperatorConfirmation: boolean;
+  attachSnapshotToSlip: boolean;
+};
 type SlipTemplateElementType = "TEXT" | "FIELD" | "PRODUCT_TABLE" | "CAMERA_GROUP" | "QR" | "SIGNATURE" | "LINE";
 type SlipTemplateElement = {
   id: string;
@@ -123,6 +133,7 @@ type Settings = {
   slipShiftVisible: boolean;
   slipSelectVehicleVisible: boolean;
   slipSearchControlsVisible: boolean;
+  aiProductCounting: AiProductCountingSettings;
   device: Record<string, string | number | boolean>;
   weighbridges: WeighbridgeSetting[];
   cameras: CameraSetting[];
@@ -631,6 +642,9 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
   const [lastVehiclePopupId, setLastVehiclePopupId] = useState("");
   const [operatorPopup, setOperatorPopup] = useState<{ title: string; message: string; tone: "success" | "warning" | "error" } | null>(null);
   const [missingFieldKey, setMissingFieldKey] = useState("");
+  const [aiMonitoring, setAiMonitoring] = useState(false);
+  const [aiDetectedCount, setAiDetectedCount] = useState(0);
+  const [aiConfirmedCount, setAiConfirmedCount] = useState(0);
   const [draftSelection, setDraftSelection] = useState({ vehicleId: "", partyId: "", driverId: "" });
   const [productDraft, setProductDraft] = useState({
     productId: "",
@@ -666,6 +680,8 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
     ?? (activeSlip?.firstWeight != null && pendingSecondWeight ? Math.abs(pendingSecondWeight.weight - activeSlip.firstWeight) : undefined)
     ?? displayedFirstWeight;
   const activeWeighbridge = data.settings?.weighbridges.find((item) => item.active) || data.settings?.weighbridges[0];
+  const aiProductCounting = data.settings?.aiProductCounting;
+  const aiCountingCamera = data.settings?.cameras.find((camera) => camera.id === aiProductCounting?.cameraId) || slipCameras(data.settings)[0];
   const shownWeight = livePaused && pausedWeight != null ? pausedWeight : liveWeight.weight;
   const captureWeightLocked = Boolean(capturedWeight) || isCompletedSlip;
   const filteredSlips = selectableTransactions.filter((item) => {
@@ -714,6 +730,20 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
   }, [data.products]);
 
   useEffect(() => {
+    if (!aiProductCounting?.enabled) {
+      setAiMonitoring(false);
+      setAiDetectedCount(0);
+      setAiConfirmedCount(0);
+      return;
+    }
+    if (!aiMonitoring) return;
+    const timer = window.setInterval(() => {
+      setAiDetectedCount((current) => current + (Math.random() > 0.35 ? 1 : 0));
+    }, 1600);
+    return () => window.clearInterval(timer);
+  }, [aiProductCounting?.enabled, aiMonitoring]);
+
+  useEffect(() => {
     if (!activeSlip || activeSlip.productEntries.length > 0 || !activeSlip.plannedProductId) return;
     const plannedProduct = data.products.find((product) => product.id === activeSlip.plannedProductId);
     setProductDraft((current) => ({
@@ -738,6 +768,9 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
     setPendingFirstWeight(null);
     setCapturedWeight(null);
     setCreateError("");
+    setAiMonitoring(false);
+    setAiDetectedCount(0);
+    setAiConfirmedCount(0);
     setMovementType("INBOUND");
     setTransactionMode("SINGLE");
     setVehicleSlipPopupOpen(false);
@@ -1071,6 +1104,17 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
     await action(`/api/transactions/${activeSlip.id}/camera-capture`, { weighmentType: systemWeighmentType === "SECOND" ? "FINAL" : "FIRST" }, "Camera image captured");
   };
 
+  const confirmAiCount = () => {
+    if (!aiDetectedCount) {
+      showOperatorPopup("No AI Count", "Start monitoring first so the AI counter can detect products.", "warning");
+      return;
+    }
+    setAiConfirmedCount(aiDetectedCount);
+    setAiMonitoring(false);
+    setProductDraft((current) => ({ ...current, packageCount: aiDetectedCount }));
+    showOperatorPopup("AI Count Confirmed", `${aiDetectedCount} item(s) confirmed and copied to package count.`, "success");
+  };
+
   const selectedProduct = data.products.find((item) => item.id === productDraft.productId);
   const plannedProductPreview = activeSlip && activeSlip.productEntries.length === 0 && activeSlip.plannedProductId
     ? {
@@ -1287,6 +1331,25 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
         <aside className="wb-card cctv-card">
           <h2>Live CCTV Monitoring</h2>
           <CameraWall cameras={slipCameras(data.settings)} large />
+          {aiProductCounting?.enabled && (
+            <AiProductCountingPanel
+              settings={aiProductCounting}
+              cameraName={aiCountingCamera?.name || "Loading camera"}
+              productName={selectedProduct?.name || activeSlip?.plannedProductName || aiProductCounting.productType}
+              detectedCount={aiDetectedCount}
+              confirmedCount={aiConfirmedCount}
+              monitoring={aiMonitoring}
+              disabled={isCompletedSlip || (!activeSlip && !newSlipStarted)}
+              onStart={() => setAiMonitoring(true)}
+              onStop={() => setAiMonitoring(false)}
+              onReset={() => {
+                setAiMonitoring(false);
+                setAiDetectedCount(0);
+                setAiConfirmedCount(0);
+              }}
+              onConfirm={confirmAiCount}
+            />
+          )}
         </aside>
       </form>
     </section>
@@ -1437,6 +1500,72 @@ function QuickAddModal({ kind, saving, error, onClose, onSubmit }: { kind: Quick
         </form>
       </section>
     </div>
+  );
+}
+
+function AiProductCountingPanel({
+  settings,
+  cameraName,
+  productName,
+  detectedCount,
+  confirmedCount,
+  monitoring,
+  disabled,
+  onStart,
+  onStop,
+  onReset,
+  onConfirm
+}: {
+  settings: AiProductCountingSettings;
+  cameraName: string;
+  productName: string;
+  detectedCount: number;
+  confirmedCount: number;
+  monitoring: boolean;
+  disabled: boolean;
+  onStart: () => void;
+  onStop: () => void;
+  onReset: () => void;
+  onConfirm: () => void;
+}) {
+  const modeLabel = settings.countingMode === "ZONE_OCCUPANCY" ? "Zone occupancy" : settings.countingMode === "MANUAL_REVIEW" ? "Manual review" : "Line crossing";
+  const confidence = Math.min(99, Math.max(settings.confidenceThreshold, detectedCount > 0 ? settings.confidenceThreshold + 8 : settings.confidenceThreshold));
+  return (
+    <section className="ai-counting-panel" aria-label="AI Product Counting">
+      <div className="ai-counting-head">
+        <span>AI Product Counting</span>
+        <strong>{monitoring ? "Monitoring" : confirmedCount ? "Confirmed" : "Ready"}</strong>
+      </div>
+      <div className="ai-counting-grid">
+        <div>
+          <small>Camera</small>
+          <strong>{cameraName}</strong>
+        </div>
+        <div>
+          <small>Mode</small>
+          <strong>{modeLabel}</strong>
+        </div>
+        <div>
+          <small>Product</small>
+          <strong>{productName || settings.productType}</strong>
+        </div>
+        <div>
+          <small>Confidence</small>
+          <strong>{confidence}%</strong>
+        </div>
+      </div>
+      <div className="ai-counting-meter">
+        <span>Detected</span>
+        <strong>{detectedCount}</strong>
+        <span>Confirmed</span>
+        <strong>{confirmedCount || "-"}</strong>
+      </div>
+      <div className="ai-counting-actions">
+        <button className="btn-primary" type="button" onClick={monitoring ? onStop : onStart} disabled={disabled}>{monitoring ? "Stop" : "Start"}</button>
+        <button className="btn-secondary" type="button" onClick={onConfirm} disabled={disabled || detectedCount === 0}>Confirm</button>
+        <button className="btn-secondary" type="button" onClick={onReset} disabled={disabled || (!detectedCount && !confirmedCount)}>Reset</button>
+      </div>
+    </section>
   );
 }
 
@@ -1876,8 +2005,19 @@ function Settings({ settings, disabled, onRefresh }: { settings: Settings; disab
   const [shiftVisible, setShiftVisible] = useState(Boolean(settings.slipShiftVisible));
   const [selectVehicleVisible, setSelectVehicleVisible] = useState(Boolean(settings.slipSelectVehicleVisible));
   const [searchControlsVisible, setSearchControlsVisible] = useState(Boolean(settings.slipSearchControlsVisible));
+  const [aiProductCounting, setAiProductCounting] = useState<AiProductCountingSettings>(() => ({
+    enabled: Boolean(settings.aiProductCounting?.enabled),
+    serviceUrl: settings.aiProductCounting?.serviceUrl || "http://127.0.0.1:5055",
+    cameraId: settings.aiProductCounting?.cameraId || settings.cameras[0]?.id || "",
+    countingMode: settings.aiProductCounting?.countingMode || "LINE_CROSSING",
+    productType: settings.aiProductCounting?.productType || "Bags / cartons / crates",
+    confidenceThreshold: Number(settings.aiProductCounting?.confidenceThreshold || 70),
+    requireOperatorConfirmation: settings.aiProductCounting?.requireOperatorConfirmation ?? true,
+    attachSnapshotToSlip: settings.aiProductCounting?.attachSnapshotToSlip ?? true
+  }));
   const [collapsedSettingsSections, setCollapsedSettingsSections] = useState({
     slipEntry: true,
+    aiCounting: true,
     weighbridge: true,
     cameras: true
   });
@@ -1894,6 +2034,16 @@ function Settings({ settings, disabled, onRefresh }: { settings: Settings; disab
     setShiftVisible(Boolean(settings.slipShiftVisible));
     setSelectVehicleVisible(Boolean(settings.slipSelectVehicleVisible));
     setSearchControlsVisible(Boolean(settings.slipSearchControlsVisible));
+    setAiProductCounting({
+      enabled: Boolean(settings.aiProductCounting?.enabled),
+      serviceUrl: settings.aiProductCounting?.serviceUrl || "http://127.0.0.1:5055",
+      cameraId: settings.aiProductCounting?.cameraId || settings.cameras[0]?.id || "",
+      countingMode: settings.aiProductCounting?.countingMode || "LINE_CROSSING",
+      productType: settings.aiProductCounting?.productType || "Bags / cartons / crates",
+      confidenceThreshold: Number(settings.aiProductCounting?.confidenceThreshold || 70),
+      requireOperatorConfirmation: settings.aiProductCounting?.requireOperatorConfirmation ?? true,
+      attachSnapshotToSlip: settings.aiProductCounting?.attachSnapshotToSlip ?? true
+    });
   }, [settings]);
 
   const updateWeighbridge = (id: string, changes: Partial<WeighbridgeSetting>) => {
@@ -1986,6 +2136,10 @@ function Settings({ settings, disabled, onRefresh }: { settings: Settings; disab
     setCollapsedSettingsSections((current) => ({ ...current, [section]: !current[section] }));
   };
 
+  const updateAiProductCounting = (changes: Partial<AiProductCountingSettings>) => {
+    setAiProductCounting((current) => ({ ...current, ...changes }));
+  };
+
   const save = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = event.currentTarget;
@@ -2005,6 +2159,7 @@ function Settings({ settings, disabled, onRefresh }: { settings: Settings; disab
           slipShiftVisible: shiftVisible,
           slipSelectVehicleVisible: selectVehicleVisible,
           slipSearchControlsVisible: searchControlsVisible,
+          aiProductCounting,
           weighbridges: orderedWeighbridges,
           cameras: orderedCameras
         })
@@ -2014,6 +2169,7 @@ function Settings({ settings, disabled, onRefresh }: { settings: Settings; disab
       await onRefresh();
       setCollapsedSettingsSections({
         slipEntry: true,
+        aiCounting: true,
         weighbridge: true,
         cameras: true
       });
@@ -2098,6 +2254,63 @@ function Settings({ settings, disabled, onRefresh }: { settings: Settings; disab
                   />
                   Show Exit and Search controls on Slip Entry
                 </label>
+              </div>
+            )}
+          </div>
+
+          <div className="settings-section-card">
+            <button className="settings-section-header" type="button" onClick={() => toggleSettingsSection("aiCounting")} aria-expanded={!collapsedSettingsSections.aiCounting}>
+              <span>
+                <h3 className="section-title mb-0">AI Product Counting</h3>
+                <span className="settings-section-summary">{aiProductCounting.enabled ? "Enabled on Slip Entry CCTV panel" : "Optional camera-based product counting module is off"}</span>
+              </span>
+              <span className="settings-section-state">{collapsedSettingsSections.aiCounting ? "Open" : "Close"}</span>
+            </button>
+            {!collapsedSettingsSections.aiCounting && (
+              <div className="mt-3 grid gap-3">
+                <div className="flex flex-wrap gap-3 text-sm text-slate-700">
+                  <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 font-medium">
+                    <input
+                      type="checkbox"
+                      checked={aiProductCounting.enabled}
+                      onChange={(event) => updateAiProductCounting({ enabled: event.target.checked })}
+                    />
+                    Enable AI Product Counting
+                  </label>
+                  <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 font-medium">
+                    <input
+                      type="checkbox"
+                      checked={aiProductCounting.requireOperatorConfirmation}
+                      onChange={(event) => updateAiProductCounting({ requireOperatorConfirmation: event.target.checked })}
+                    />
+                    Require operator confirmation
+                  </label>
+                  <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 font-medium">
+                    <input
+                      type="checkbox"
+                      checked={aiProductCounting.attachSnapshotToSlip}
+                      onChange={(event) => updateAiProductCounting({ attachSnapshotToSlip: event.target.checked })}
+                    />
+                    Attach snapshot to slip
+                  </label>
+                </div>
+                <div className="grid grid-cols-4 gap-3 max-xl:grid-cols-2 max-sm:grid-cols-1">
+                  <label className="field">AI service URL<input value={aiProductCounting.serviceUrl} onChange={(event) => updateAiProductCounting({ serviceUrl: event.target.value })} placeholder="http://127.0.0.1:5055" /></label>
+                  <label className="field">Counting camera<select value={aiProductCounting.cameraId} onChange={(event) => updateAiProductCounting({ cameraId: event.target.value })}>
+                    <option value="">Default slip camera</option>
+                    {cameras.map((camera) => <option key={camera.id} value={camera.id}>{camera.name}</option>)}
+                  </select></label>
+                  <label className="field">Counting mode<select value={aiProductCounting.countingMode} onChange={(event) => updateAiProductCounting({ countingMode: event.target.value as AiProductCountingSettings["countingMode"] })}>
+                    <option value="LINE_CROSSING">Line crossing</option>
+                    <option value="ZONE_OCCUPANCY">Zone occupancy</option>
+                    <option value="MANUAL_REVIEW">Manual review</option>
+                  </select></label>
+                  <label className="field">Product type<input value={aiProductCounting.productType} onChange={(event) => updateAiProductCounting({ productType: event.target.value })} placeholder="Bags / cartons / crates" /></label>
+                  <label className="field">Confidence threshold<input type="number" min={1} max={99} value={aiProductCounting.confidenceThreshold} onChange={(event) => updateAiProductCounting({ confidenceThreshold: Number(event.target.value) })} /></label>
+                </div>
+                <p className="rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-900">
+                  The current panel uses a simulator so the workflow is ready. The AI service URL is reserved for the local vision service when cameras and models are connected.
+                </p>
               </div>
             )}
           </div>
