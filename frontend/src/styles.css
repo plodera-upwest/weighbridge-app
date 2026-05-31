@@ -3853,6 +3853,27 @@
   }
 }
 
+/* Keep the slip CCTV tiles compact regardless of whether 1, 2, or 3 cameras are selected. */
+.slip-app .cctv-card .camera-live-grid {
+  align-content: start !important;
+  align-items: start !important;
+  grid-auto-rows: max-content !important;
+}
+
+.slip-app .cctv-card .camera-live-grid figure {
+  align-self: start !important;
+  display: block !important;
+  height: auto !important;
+  min-height: 0 !important;
+}
+
+.slip-app .cctv-card .camera-live-grid img {
+  display: block !important;
+  width: 100% !important;
+  height: auto !important;
+  object-fit: cover !important;
+}
+
 @media (min-width: 981px) and (max-width: 1599px) {
   .slip-app .weighbridge-workspace {
     grid-template-columns: minmax(290px, 0.92fr) minmax(480px, 1.2fr) minmax(260px, 0.74fr) !important;
