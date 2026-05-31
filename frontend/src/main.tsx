@@ -704,9 +704,24 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
     if (isCreating) return;
     if (!selectedVehicleId || activeSlip || vehicleSlips.length === 0) return;
     if (lastVehiclePopupId === selectedVehicleId) return;
-    setVehicleSlipPopupOpen(true);
     setLastVehiclePopupId(selectedVehicleId);
-  }, [selectedVehicleId, activeSlip?.id, vehicleSlips.length, lastVehiclePopupId, isCreating]);
+    if (vehicleOpenSlips.length > 0) {
+      setVehicleSlipPopupOpen(true);
+      return;
+    }
+    if (!newSlipStarted && vehicleCompletedSlips.length > 0) {
+      const latestCompletedSlip = vehicleCompletedSlips[0];
+      setActiveSlipId(latestCompletedSlip.id);
+      setPendingFirstWeight(null);
+      setCapturedWeight(null);
+      setCreateError("");
+      setMovementType(latestCompletedSlip.movementType || "INBOUND");
+      setTransactionMode(latestCompletedSlip.mode);
+      setVehicleSlipPopupOpen(false);
+      setDirectSlipToConfirm(null);
+      onToast(`Viewing slip ${latestCompletedSlip.transactionNo}`);
+    }
+  }, [selectedVehicleId, activeSlip?.id, vehicleSlips.length, vehicleOpenSlips.length, vehicleCompletedSlips.length, lastVehiclePopupId, isCreating, newSlipStarted]);
 
   useEffect(() => {
     api<{ slipNo: string; mode: Settings["slipNumberMode"] }>("/api/transactions/next-slip-no")
@@ -1213,9 +1228,9 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
               <label className={fieldClass("driverIdentity")} data-required-key="driverIdentity">Driver ID<input name="driverIdentity" defaultValue={activeSlip?.driverIdentity || ""} disabled={lockLoadedSlipDetails} /></label>
               <label className={fieldClass("destination")} data-required-key="destination">{locationLabel}<input name="destination" defaultValue={activeSlip?.destination || ""} disabled={lockLoadedSlipDetails} /></label>
             </div>
-            {!activeSlip && selectedVehicleId && vehicleSlips.length > 0 && (
+            {!activeSlip && selectedVehicleId && vehicleOpenSlips.length > 0 && (
               <div className="vehicle-slip-hint">
-                <span>{vehicleOpenSlips.length > 0 ? "Open slip exists for this vehicle. Continue it before creating a new slip." : "Previous slips exist for this vehicle."}</span>
+                <span>Open slip exists for this vehicle. Continue it before creating a new slip.</span>
                 <button className="btn-secondary" type="button" onClick={() => setVehicleSlipPopupOpen(true)}>View</button>
               </div>
             )}
