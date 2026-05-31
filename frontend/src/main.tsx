@@ -1,6 +1,6 @@
 import React, { FormEvent, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { BarChart3, History, LayoutDashboard, Package, Scale, Settings as SettingsIcon, Truck, User, Users as UsersIcon, type LucideIcon } from "lucide-react";
+import { BarChart3, Camera, History, LayoutDashboard, Package, Scale, Settings as SettingsIcon, Truck, User, Users as UsersIcon, type LucideIcon } from "lucide-react";
 import "./styles.css";
 
 type Role = "ADMIN" | "WEIGHBRIDGE_OPERATOR" | "ACCOUNTS" | "STORE_DISPATCH" | "VIEWER";
@@ -378,6 +378,12 @@ function App() {
     return () => window.clearInterval(timer);
   }, [data.user]);
 
+  useEffect(() => {
+    if (active === "AI Product Counting" && data.settings && !data.settings.aiProductCounting?.enabled) {
+      setActive("Dashboard");
+    }
+  }, [active, data.settings?.aiProductCounting?.enabled]);
+
   const login = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = event.currentTarget;
@@ -436,6 +442,7 @@ function App() {
   const utilityMenu = [
     "Audit Logs",
     "Users",
+    ...(data.settings.aiProductCounting?.enabled ? ["AI Product Counting"] : []),
     "Slip Designer",
     "Settings"
   ];
@@ -499,6 +506,7 @@ function App() {
         {active === "Reports" && <Reports />}
         {active === "Audit Logs" && <AuditLogs />}
         {active === "Users" && <Users disabled={!can(data.user, "MANAGE_USERS")} />}
+        {active === "AI Product Counting" && <AiProductCounting data={data} />}
         {active === "Slip Designer" && <SlipDesigner settings={data.settings} disabled={!can(data.user, "CHANGE_SETTINGS")} onRefresh={refresh} />}
         {active === "Settings" && <Settings settings={data.settings} disabled={!can(data.user, "CHANGE_SETTINGS")} onRefresh={refresh} />}
       </section>
@@ -642,9 +650,6 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
   const [lastVehiclePopupId, setLastVehiclePopupId] = useState("");
   const [operatorPopup, setOperatorPopup] = useState<{ title: string; message: string; tone: "success" | "warning" | "error" } | null>(null);
   const [missingFieldKey, setMissingFieldKey] = useState("");
-  const [aiMonitoring, setAiMonitoring] = useState(false);
-  const [aiDetectedCount, setAiDetectedCount] = useState(0);
-  const [aiConfirmedCount, setAiConfirmedCount] = useState(0);
   const [draftSelection, setDraftSelection] = useState({ vehicleId: "", partyId: "", driverId: "" });
   const [productDraft, setProductDraft] = useState({
     productId: "",
@@ -680,8 +685,6 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
     ?? (activeSlip?.firstWeight != null && pendingSecondWeight ? Math.abs(pendingSecondWeight.weight - activeSlip.firstWeight) : undefined)
     ?? displayedFirstWeight;
   const activeWeighbridge = data.settings?.weighbridges.find((item) => item.active) || data.settings?.weighbridges[0];
-  const aiProductCounting = data.settings?.aiProductCounting;
-  const aiCountingCamera = data.settings?.cameras.find((camera) => camera.id === aiProductCounting?.cameraId) || slipCameras(data.settings)[0];
   const shownWeight = livePaused && pausedWeight != null ? pausedWeight : liveWeight.weight;
   const captureWeightLocked = Boolean(capturedWeight) || isCompletedSlip;
   const filteredSlips = selectableTransactions.filter((item) => {
@@ -730,20 +733,6 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
   }, [data.products]);
 
   useEffect(() => {
-    if (!aiProductCounting?.enabled) {
-      setAiMonitoring(false);
-      setAiDetectedCount(0);
-      setAiConfirmedCount(0);
-      return;
-    }
-    if (!aiMonitoring) return;
-    const timer = window.setInterval(() => {
-      setAiDetectedCount((current) => current + (Math.random() > 0.35 ? 1 : 0));
-    }, 1600);
-    return () => window.clearInterval(timer);
-  }, [aiProductCounting?.enabled, aiMonitoring]);
-
-  useEffect(() => {
     if (!activeSlip || activeSlip.productEntries.length > 0 || !activeSlip.plannedProductId) return;
     const plannedProduct = data.products.find((product) => product.id === activeSlip.plannedProductId);
     setProductDraft((current) => ({
@@ -768,9 +757,6 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
     setPendingFirstWeight(null);
     setCapturedWeight(null);
     setCreateError("");
-    setAiMonitoring(false);
-    setAiDetectedCount(0);
-    setAiConfirmedCount(0);
     setMovementType("INBOUND");
     setTransactionMode("SINGLE");
     setVehicleSlipPopupOpen(false);
@@ -1104,17 +1090,6 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
     await action(`/api/transactions/${activeSlip.id}/camera-capture`, { weighmentType: systemWeighmentType === "SECOND" ? "FINAL" : "FIRST" }, "Camera image captured");
   };
 
-  const confirmAiCount = () => {
-    if (!aiDetectedCount) {
-      showOperatorPopup("No AI Count", "Start monitoring first so the AI counter can detect products.", "warning");
-      return;
-    }
-    setAiConfirmedCount(aiDetectedCount);
-    setAiMonitoring(false);
-    setProductDraft((current) => ({ ...current, packageCount: aiDetectedCount }));
-    showOperatorPopup("AI Count Confirmed", `${aiDetectedCount} item(s) confirmed and copied to package count.`, "success");
-  };
-
   const selectedProduct = data.products.find((item) => item.id === productDraft.productId);
   const plannedProductPreview = activeSlip && activeSlip.productEntries.length === 0 && activeSlip.plannedProductId
     ? {
@@ -1331,25 +1306,6 @@ function Transactions({ data, liveWeight, onRefresh, onToast, onView, onBack }: 
         <aside className="wb-card cctv-card">
           <h2>Live CCTV Monitoring</h2>
           <CameraWall cameras={slipCameras(data.settings)} large />
-          {aiProductCounting?.enabled && (
-            <AiProductCountingPanel
-              settings={aiProductCounting}
-              cameraName={aiCountingCamera?.name || "Loading camera"}
-              productName={selectedProduct?.name || activeSlip?.plannedProductName || aiProductCounting.productType}
-              detectedCount={aiDetectedCount}
-              confirmedCount={aiConfirmedCount}
-              monitoring={aiMonitoring}
-              disabled={isCompletedSlip || (!activeSlip && !newSlipStarted)}
-              onStart={() => setAiMonitoring(true)}
-              onStop={() => setAiMonitoring(false)}
-              onReset={() => {
-                setAiMonitoring(false);
-                setAiDetectedCount(0);
-                setAiConfirmedCount(0);
-              }}
-              onConfirm={confirmAiCount}
-            />
-          )}
         </aside>
       </form>
     </section>
@@ -1500,6 +1456,188 @@ function QuickAddModal({ kind, saving, error, onClose, onSubmit }: { kind: Quick
         </form>
       </section>
     </div>
+  );
+}
+
+function AiProductCounting({ data }: { data: AppData }) {
+  const settings = data.settings?.aiProductCounting;
+  const cameras = useMemo(() => (data.settings?.cameras || [])
+    .filter((camera) => camera.active)
+    .sort((left, right) => left.displayOrder - right.displayOrder), [data.settings?.cameras]);
+  const openSlips = useMemo(() => data.transactions
+    .filter((transaction) => transaction.status !== "COMPLETED" && transaction.status !== "CANCELLED")
+    .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()), [data.transactions]);
+  const [selectedSlipId, setSelectedSlipId] = useState("");
+  const [selectedCameraId, setSelectedCameraId] = useState(settings?.cameraId || "");
+  const [selectedProductId, setSelectedProductId] = useState("");
+  const [monitoring, setMonitoring] = useState(false);
+  const [detectedCount, setDetectedCount] = useState(0);
+  const [confirmedCount, setConfirmedCount] = useState(0);
+  const [moduleMessage, setModuleMessage] = useState("");
+  const selectedSlip = openSlips.find((transaction) => transaction.id === selectedSlipId) || null;
+  const selectedCamera = cameras.find((camera) => camera.id === selectedCameraId) || cameras[0] || null;
+  const selectedProduct = data.products.find((product) => product.id === selectedProductId) || null;
+
+  useEffect(() => {
+    if (!selectedSlipId && openSlips[0]) {
+      setSelectedSlipId(openSlips[0].id);
+      return;
+    }
+    if (selectedSlipId && !openSlips.some((transaction) => transaction.id === selectedSlipId)) {
+      setSelectedSlipId(openSlips[0]?.id || "");
+    }
+  }, [selectedSlipId, openSlips]);
+
+  useEffect(() => {
+    if (!selectedCameraId || !cameras.some((camera) => camera.id === selectedCameraId)) {
+      setSelectedCameraId(settings?.cameraId || cameras[0]?.id || "");
+    }
+  }, [selectedCameraId, cameras, settings?.cameraId]);
+
+  useEffect(() => {
+    if (selectedSlip?.plannedProductId) {
+      setSelectedProductId(selectedSlip.plannedProductId);
+    }
+  }, [selectedSlip?.id, selectedSlip?.plannedProductId]);
+
+  useEffect(() => {
+    if (!settings?.enabled || !monitoring) return undefined;
+    const timer = window.setInterval(() => {
+      setDetectedCount((current) => current + (Math.random() > 0.28 ? 1 : 0));
+    }, 1400);
+    return () => window.clearInterval(timer);
+  }, [settings?.enabled, monitoring]);
+
+  const resetCount = () => {
+    setMonitoring(false);
+    setDetectedCount(0);
+    setConfirmedCount(0);
+    setModuleMessage("");
+  };
+
+  const confirmCount = () => {
+    if (!detectedCount) {
+      setModuleMessage("Start monitoring first so the AI counter can detect products.");
+      return;
+    }
+    setMonitoring(false);
+    setConfirmedCount(detectedCount);
+    setModuleMessage(`${detectedCount} item(s) confirmed for operator review.`);
+  };
+
+  if (!settings?.enabled) {
+    return (
+      <section className="grid gap-5">
+        <Header eyebrow="AI Vision" title="AI Product Counting" />
+        <section className="panel">
+          <p className="text-sm font-medium text-slate-600">AI Product Counting is currently disabled. Enable it from Settings to show this operator module.</p>
+        </section>
+      </section>
+    );
+  }
+
+  return (
+    <section className="ai-module-page grid gap-5">
+      <Header eyebrow="AI Vision" title="AI Product Counting" />
+      <div className="ai-module-layout">
+        <section className="ai-module-main panel">
+          <div className="ai-module-header">
+            <div>
+              <p className="slip-eyebrow">Counting Console</p>
+              <h3>Product Loading Monitor</h3>
+            </div>
+            <span className={monitoring ? "ai-status ai-status-live" : "ai-status"}>{monitoring ? "Monitoring" : "Ready"}</span>
+          </div>
+
+          <div className="ai-module-controls">
+            <label className="field">Open slip
+              <select value={selectedSlipId} onChange={(event) => {
+                setSelectedSlipId(event.target.value);
+                resetCount();
+              }}>
+                <option value="">No slip selected</option>
+                {openSlips.map((transaction) => (
+                  <option key={transaction.id} value={transaction.id}>{transaction.transactionNo} - {transaction.vehicleNo}</option>
+                ))}
+              </select>
+            </label>
+            <label className="field">Counting camera
+              <select value={selectedCamera?.id || ""} onChange={(event) => {
+                setSelectedCameraId(event.target.value);
+                resetCount();
+              }}>
+                {cameras.map((camera) => (
+                  <option key={camera.id} value={camera.id}>{camera.name} - {camera.position}</option>
+                ))}
+              </select>
+            </label>
+            <label className="field">Product
+              <select value={selectedProductId} onChange={(event) => {
+                setSelectedProductId(event.target.value);
+                resetCount();
+              }}>
+                <option value="">Use configured product type</option>
+                {data.products.map((product) => (
+                  <option key={product.id} value={product.id}>{product.name}</option>
+                ))}
+              </select>
+            </label>
+            <label className="field">AI service URL
+              <input value={settings.serviceUrl || "-"} readOnly />
+            </label>
+          </div>
+
+          <div className="ai-camera-stage">
+            <CameraWall cameras={selectedCamera ? [selectedCamera] : cameras.slice(0, 1)} large />
+          </div>
+
+          <div className="ai-module-meta">
+            <span>Mode<strong>{settings.countingMode.replace("_", " ")}</strong></span>
+            <span>Confidence threshold<strong>{settings.confidenceThreshold}%</strong></span>
+            <span>Slip vehicle<strong>{selectedSlip?.vehicleNo || "-"}</strong></span>
+            <span>Movement<strong>{selectedSlip?.movementType || "-"}</strong></span>
+          </div>
+        </section>
+
+        <aside className="ai-module-side">
+          <AiProductCountingPanel
+            settings={settings}
+            cameraName={selectedCamera?.name || "No camera selected"}
+            productName={selectedProduct?.name || selectedSlip?.plannedProductName || settings.productType}
+            detectedCount={detectedCount}
+            confirmedCount={confirmedCount}
+            monitoring={monitoring}
+            disabled={cameras.length === 0}
+            onStart={() => {
+              setModuleMessage("");
+              setMonitoring(true);
+            }}
+            onStop={() => setMonitoring(false)}
+            onReset={resetCount}
+            onConfirm={confirmCount}
+          />
+          {moduleMessage && <p className={`ai-module-message ${confirmedCount ? "success" : "warning"}`}>{moduleMessage}</p>}
+          <section className="ai-open-slips panel">
+            <h3>Open Slips</h3>
+            {openSlips.length === 0 ? (
+              <p>No open slips are waiting for counting.</p>
+            ) : (
+              <div className="ai-open-slip-list">
+                {openSlips.slice(0, 6).map((transaction) => (
+                  <button key={transaction.id} type="button" className={selectedSlipId === transaction.id ? "active" : ""} onClick={() => {
+                    setSelectedSlipId(transaction.id);
+                    resetCount();
+                  }}>
+                    <strong>{transaction.transactionNo}</strong>
+                    <span>{transaction.vehicleNo} | {transaction.partyName}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
+        </aside>
+      </div>
+    </section>
   );
 }
 
@@ -2262,7 +2400,7 @@ function Settings({ settings, disabled, onRefresh }: { settings: Settings; disab
             <button className="settings-section-header" type="button" onClick={() => toggleSettingsSection("aiCounting")} aria-expanded={!collapsedSettingsSections.aiCounting}>
               <span>
                 <h3 className="section-title mb-0">AI Product Counting</h3>
-                <span className="settings-section-summary">{aiProductCounting.enabled ? "Enabled on Slip Entry CCTV panel" : "Optional camera-based product counting module is off"}</span>
+                <span className="settings-section-summary">{aiProductCounting.enabled ? "Enabled as separate left-menu module" : "Optional camera-based product counting module is off"}</span>
               </span>
               <span className="settings-section-state">{collapsedSettingsSections.aiCounting ? "Open" : "Close"}</span>
             </button>
@@ -2715,6 +2853,7 @@ function MenuIcon({ name }: { name: string }) {
     Reports: BarChart3,
     "Audit Logs": History,
     Users: UsersIcon,
+    "AI Product Counting": Camera,
     "Slip Designer": Package,
     Settings: SettingsIcon
   };
