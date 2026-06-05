@@ -1526,7 +1526,6 @@ function AiProductCounting({ data }: { data: AppData }) {
   const configuredServiceBase = useMemo(() => cleanHttpUrl(rawServiceUrl), [rawServiceUrl]);
   const defaultServiceBase = useMemo(() => localAiServiceUrl(), []);
   const serviceBase = configuredServiceBase || defaultServiceBase;
-  const usingDefaultService = !configuredServiceBase && Boolean(defaultServiceBase);
   const cameras = useMemo(() => (data.settings?.cameras || [])
     .filter((camera) => camera.active)
     .sort((left, right) => left.displayOrder - right.displayOrder), [data.settings?.cameras]);
@@ -1727,9 +1726,6 @@ function AiProductCounting({ data }: { data: AppData }) {
                   <option key={product.id} value={product.id}>{product.name}</option>
                 ))}
               </select>
-            </label>
-            <label className="field">AI service URL
-              <input value={serviceBase ? `${usingDefaultService ? "Local default: " : ""}${serviceBase}` : "Configure in Settings"} readOnly />
             </label>
           </div>
 
