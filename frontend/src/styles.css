@@ -4859,6 +4859,90 @@
   line-height: 1;
 }
 
+.ai-counting-checks {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #bbf7d0;
+  border-radius: 14px;
+  background: #f0fdf4;
+  padding: 10px;
+}
+
+.ai-counting-checks.has-warnings {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+
+.ai-counting-checks-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ai-counting-checks-head span {
+  color: #0f766e;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.ai-counting-checks.has-warnings .ai-counting-checks-head span {
+  color: #92400e;
+}
+
+.ai-counting-checks-head strong {
+  border-radius: 999px;
+  background: #ffffff;
+  padding: 3px 8px;
+  color: #166534;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.ai-counting-checks.has-warnings .ai-counting-checks-head strong {
+  color: #92400e;
+}
+
+.ai-counting-checks p,
+.ai-counting-checks li {
+  color: #475569;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.ai-counting-checks ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ai-counting-checks li {
+  display: grid;
+  gap: 2px;
+  border-left: 3px solid #f59e0b;
+  padding-left: 8px;
+}
+
+.ai-counting-checks li.severity-critical {
+  border-left-color: #dc2626;
+}
+
+.ai-counting-checks li.severity-info {
+  border-left-color: #2563eb;
+}
+
+.ai-counting-checks li small {
+  color: #92400e;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+}
+
 .ai-counting-actions {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

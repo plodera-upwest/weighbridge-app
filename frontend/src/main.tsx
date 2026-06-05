@@ -69,6 +69,11 @@ type AiProductCountingSettings = {
   requireOperatorConfirmation: boolean;
   attachSnapshotToSlip: boolean;
 };
+type AiCountingWarning = {
+  code: string;
+  severity: "INFO" | "WARNING" | "CRITICAL";
+  message: string;
+};
 type AiCountingStatus = {
   running: boolean;
   detectedCount: number;
@@ -80,6 +85,8 @@ type AiCountingStatus = {
   fps: number;
   frameSize: string;
   hasSnapshot: boolean;
+  warnings?: AiCountingWarning[];
+  activeTracks?: number;
 };
 type SlipTemplateElementType = "TEXT" | "FIELD" | "PRODUCT_TABLE" | "CAMERA_GROUP" | "QR" | "SIGNATURE" | "LINE";
 type SlipTemplateElement = {
@@ -1558,6 +1565,7 @@ function AiProductCounting({ data }: { data: AppData }) {
   const monitoring = Boolean(serviceStatus?.running);
   const detectedCount = Number(serviceStatus?.detectedCount || 0);
   const confirmedCount = Number(serviceStatus?.confirmedCount || 0);
+  const countingWarnings = serviceStatus?.warnings || [];
 
   useEffect(() => {
     if (!selectedSlipId && openSlips[0]) {
@@ -1771,6 +1779,7 @@ function AiProductCounting({ data }: { data: AppData }) {
             productName={selectedProduct?.name || selectedSlip?.plannedProductName || settings.productType}
             detectedCount={detectedCount}
             confirmedCount={confirmedCount}
+            warnings={countingWarnings}
             monitoring={monitoring}
             disabled={cameras.length === 0 || !serviceBase}
             onStart={startMonitoring}
@@ -1814,6 +1823,7 @@ function AiProductCountingPanel({
   productName,
   detectedCount,
   confirmedCount,
+  warnings,
   monitoring,
   disabled,
   onStart,
@@ -1826,6 +1836,7 @@ function AiProductCountingPanel({
   productName: string;
   detectedCount: number;
   confirmedCount: number;
+  warnings: AiCountingWarning[];
   monitoring: boolean;
   disabled: boolean;
   onStart: () => void;
@@ -1864,6 +1875,24 @@ function AiProductCountingPanel({
         <strong>{detectedCount}</strong>
         <span>Confirmed</span>
         <strong>{confirmedCount || "-"}</strong>
+      </div>
+      <div className={warnings.length ? "ai-counting-checks has-warnings" : "ai-counting-checks"}>
+        <div className="ai-counting-checks-head">
+          <span>Checks & balances</span>
+          <strong>{warnings.length ? `${warnings.length} warning${warnings.length === 1 ? "" : "s"}` : "Clear"}</strong>
+        </div>
+        {warnings.length ? (
+          <ul>
+            {warnings.slice(0, 3).map((warning) => (
+              <li key={`${warning.code}-${warning.message}`} className={`severity-${warning.severity.toLowerCase()}`}>
+                <small>{warning.severity}</small>
+                <span>{warning.message}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p>No stalled billet, overlap, wrong direction, or low-confidence issue detected.</p>
+        )}
       </div>
       <div className="ai-counting-actions">
         <button className="btn-primary" type="button" onClick={monitoring ? onStop : onStart} disabled={disabled}>{monitoring ? "Stop" : "Start"}</button>
