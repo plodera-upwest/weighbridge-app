@@ -59,6 +59,24 @@ DEVICE_SERVICE_URL=http://127.0.0.1:4180
 
 The device service currently supports a simulator and TCP skeleton. Serial COM support should be wired with the `serialport` package on the machine connected to the weighbridge indicator.
 
+## Optional AI Product Counting
+
+The left-menu AI Product Counting module can connect to a separate local service for camera-based counting.
+
+```powershell
+pip install -r ai-service/requirements.txt
+$env:AI_RTSP_URL="rtsp://admin:PASSWORD@192.168.13.76:554/stream1"
+python ai-service/product_counter.py
+```
+
+Then enable AI Product Counting in Settings and set the AI service URL to:
+
+```text
+http://127.0.0.1:5055
+```
+
+The first service version counts moving products crossing a line. For billet-grade accuracy, collect sample footage and train a billet-specific model.
+
 ## Database
 
 The Prisma schema is PostgreSQL-ready. Set `DATABASE_URL`, then run:

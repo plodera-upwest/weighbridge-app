@@ -69,6 +69,18 @@ type AiProductCountingSettings = {
   requireOperatorConfirmation: boolean;
   attachSnapshotToSlip: boolean;
 };
+type AiCountingStatus = {
+  running: boolean;
+  detectedCount: number;
+  confirmedCount: number;
+  confidence: number;
+  mode: string;
+  productType: string;
+  message: string;
+  fps: number;
+  frameSize: string;
+  hasSnapshot: boolean;
+};
 type SlipTemplateElementType = "TEXT" | "FIELD" | "PRODUCT_TABLE" | "CAMERA_GROUP" | "QR" | "SIGNATURE" | "LINE";
 type SlipTemplateElement = {
   id: string;
@@ -1480,6 +1492,7 @@ function QuickAddModal({ kind, saving, error, onClose, onSubmit }: { kind: Quick
 
 function AiProductCounting({ data }: { data: AppData }) {
   const settings = data.settings?.aiProductCounting;
+  const serviceBase = useMemo(() => (settings?.serviceUrl || "").replace(/\/+$/, ""), [settings?.serviceUrl]);
   const cameras = useMemo(() => (data.settings?.cameras || [])
     .filter((camera) => camera.active)
     .sort((left, right) => left.displayOrder - right.displayOrder), [data.settings?.cameras]);
@@ -1489,13 +1502,16 @@ function AiProductCounting({ data }: { data: AppData }) {
   const [selectedSlipId, setSelectedSlipId] = useState("");
   const [selectedCameraId, setSelectedCameraId] = useState(settings?.cameraId || "");
   const [selectedProductId, setSelectedProductId] = useState("");
-  const [monitoring, setMonitoring] = useState(false);
-  const [detectedCount, setDetectedCount] = useState(0);
-  const [confirmedCount, setConfirmedCount] = useState(0);
+  const [serviceStatus, setServiceStatus] = useState<AiCountingStatus | null>(null);
+  const [serviceError, setServiceError] = useState("");
+  const [snapshotRefresh, setSnapshotRefresh] = useState(Date.now());
   const [moduleMessage, setModuleMessage] = useState("");
   const selectedSlip = openSlips.find((transaction) => transaction.id === selectedSlipId) || null;
   const selectedCamera = cameras.find((camera) => camera.id === selectedCameraId) || cameras[0] || null;
   const selectedProduct = data.products.find((product) => product.id === selectedProductId) || null;
+  const monitoring = Boolean(serviceStatus?.running);
+  const detectedCount = Number(serviceStatus?.detectedCount || 0);
+  const confirmedCount = Number(serviceStatus?.confirmedCount || 0);
 
   useEffect(() => {
     if (!selectedSlipId && openSlips[0]) {
@@ -1520,28 +1536,102 @@ function AiProductCounting({ data }: { data: AppData }) {
   }, [selectedSlip?.id, selectedSlip?.plannedProductId]);
 
   useEffect(() => {
-    if (!settings?.enabled || !monitoring) return undefined;
+    if (!settings?.enabled || !serviceBase) return undefined;
     const timer = window.setInterval(() => {
-      setDetectedCount((current) => current + (Math.random() > 0.28 ? 1 : 0));
-    }, 1400);
+      void refreshAiStatus(true);
+    }, 1500);
+    void refreshAiStatus(true);
     return () => window.clearInterval(timer);
-  }, [settings?.enabled, monitoring]);
+  }, [settings?.enabled, serviceBase]);
 
-  const resetCount = () => {
-    setMonitoring(false);
-    setDetectedCount(0);
-    setConfirmedCount(0);
-    setModuleMessage("");
+  const aiFetch = async (path: string, init?: RequestInit) => {
+    if (!serviceBase) throw new Error("AI service URL is not configured.");
+    const response = await fetch(`${serviceBase}${path}`, {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        ...(init?.headers || {})
+      }
+    });
+    const body = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(body?.detail || body?.error || `AI service returned ${response.status}`);
+    }
+    return body as AiCountingStatus;
   };
 
-  const confirmCount = () => {
+  const refreshAiStatus = async (silent = false) => {
+    try {
+      const status = await aiFetch("/api/counting/status");
+      setServiceStatus(status);
+      setSnapshotRefresh(Date.now());
+      if (!silent) setServiceError("");
+    } catch (error) {
+      if (!silent) setServiceError(error instanceof Error ? error.message : "AI service is not reachable.");
+    }
+  };
+
+  const resetCount = () => {
+    setServiceError("");
+    setModuleMessage("");
+    void aiFetch("/api/counting/reset", { method: "POST" })
+      .then((status) => {
+        setServiceStatus(status);
+        setSnapshotRefresh(Date.now());
+      })
+      .catch(() => setServiceStatus(null));
+  };
+
+  const startMonitoring = async () => {
+    if (!selectedSlip) {
+      setModuleMessage("Select an open slip before starting AI counting.");
+      return;
+    }
+    if (!selectedCamera) {
+      setModuleMessage("Select a counting camera before starting AI counting.");
+      return;
+    }
+    try {
+      setServiceError("");
+      setModuleMessage("");
+      const status = await aiFetch("/api/counting/start", {
+        method: "POST",
+        body: JSON.stringify({
+          rtspUrl: selectedCamera.rtspUrl || undefined,
+          mode: settings?.countingMode || "LINE_CROSSING",
+          productType: selectedProduct?.name || selectedSlip.plannedProductName || settings?.productType || "Billets",
+          confidenceThreshold: settings?.confidenceThreshold || 70
+        })
+      });
+      setServiceStatus(status);
+      setSnapshotRefresh(Date.now());
+    } catch (error) {
+      setServiceError(error instanceof Error ? error.message : "AI service is not reachable.");
+    }
+  };
+
+  const stopMonitoring = async () => {
+    try {
+      const status = await aiFetch("/api/counting/stop", { method: "POST" });
+      setServiceStatus(status);
+      setSnapshotRefresh(Date.now());
+    } catch (error) {
+      setServiceError(error instanceof Error ? error.message : "AI service is not reachable.");
+    }
+  };
+
+  const confirmCount = async () => {
     if (!detectedCount) {
       setModuleMessage("Start monitoring first so the AI counter can detect products.");
       return;
     }
-    setMonitoring(false);
-    setConfirmedCount(detectedCount);
-    setModuleMessage(`${detectedCount} item(s) confirmed for operator review.`);
+    try {
+      const status = await aiFetch("/api/counting/confirm", { method: "POST" });
+      setServiceStatus(status);
+      setModuleMessage(`${status.confirmedCount} item(s) confirmed for operator review.`);
+    } catch (error) {
+      setServiceError(error instanceof Error ? error.message : "AI service is not reachable.");
+    }
   };
 
   if (!settings?.enabled) {
@@ -1607,7 +1697,17 @@ function AiProductCounting({ data }: { data: AppData }) {
           </div>
 
           <div className="ai-camera-stage">
-            <CameraWall cameras={selectedCamera ? [selectedCamera] : cameras.slice(0, 1)} large />
+            {serviceStatus?.hasSnapshot ? (
+              <figure className="ai-service-preview">
+                <img src={`${serviceBase}/api/counting/snapshot.jpg?refresh=${snapshotRefresh}`} alt="AI product counting camera preview" />
+                <figcaption>
+                  <span>{serviceStatus.message}</span>
+                  <strong>{serviceStatus.frameSize} | {serviceStatus.fps} FPS</strong>
+                </figcaption>
+              </figure>
+            ) : (
+              <CameraWall cameras={selectedCamera ? [selectedCamera] : cameras.slice(0, 1)} large />
+            )}
           </div>
 
           <div className="ai-module-meta">
@@ -1626,16 +1726,13 @@ function AiProductCounting({ data }: { data: AppData }) {
             detectedCount={detectedCount}
             confirmedCount={confirmedCount}
             monitoring={monitoring}
-            disabled={cameras.length === 0}
-            onStart={() => {
-              setModuleMessage("");
-              setMonitoring(true);
-            }}
-            onStop={() => setMonitoring(false)}
+            disabled={cameras.length === 0 || !serviceBase}
+            onStart={startMonitoring}
+            onStop={stopMonitoring}
             onReset={resetCount}
             onConfirm={confirmCount}
           />
-          {moduleMessage && <p className={`ai-module-message ${confirmedCount ? "success" : "warning"}`}>{moduleMessage}</p>}
+          {(serviceError || moduleMessage) && <p className={`ai-module-message ${confirmedCount && !serviceError ? "success" : "warning"}`}>{serviceError || moduleMessage}</p>}
           <section className="ai-open-slips panel">
             <h3>Open Slips</h3>
             {openSlips.length === 0 ? (

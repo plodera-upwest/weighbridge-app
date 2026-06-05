@@ -12,6 +12,7 @@
     "dev:frontend": "vite --config frontend/vite.config.ts --host 127.0.0.1 --port 4175",
     "dev:backend": "tsx watch backend/src/server.ts",
     "dev:device": "tsx watch device-service/src/server.ts",
+    "ai:service": "python ai-service/product_counter.py",
     "prisma:generate": "prisma generate --schema database/schema.prisma",
     "db:migrate:deploy": "prisma migrate deploy --schema database/schema.prisma",
     "db:indexes:apply": "node database/scripts/apply-performance-indexes.mjs",
