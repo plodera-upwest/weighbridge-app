@@ -63,6 +63,8 @@ class ProductCounter:
         self.warnings: List[dict] = []
         self.last_frame_at = 0.0
         self.last_count_frame = -9999
+        self.low_confidence_frames = 0
+        self.distorted_frames = 0
 
     def start(self, rtsp_url: str, mode: str, product_type: str, confidence_threshold: int) -> None:
         if cv2 is None or np is None:
@@ -88,6 +90,8 @@ class ProductCounter:
             self.warnings = []
             self.last_frame_at = 0.0
             self.last_count_frame = -9999
+            self.low_confidence_frames = 0
+            self.distorted_frames = 0
         self.thread = threading.Thread(target=self._run, args=(rtsp_url,), daemon=True)
         self.thread.start()
 
@@ -108,6 +112,8 @@ class ProductCounter:
             self.next_track_id = 1
             self.warnings = []
             self.last_count_frame = -9999
+            self.low_confidence_frames = 0
+            self.distorted_frames = 0
             self.message = "Counter reset"
 
     def confirm(self) -> None:
@@ -168,7 +174,7 @@ class ProductCounter:
             hot_mask, motion_mask = self._build_billet_mask(frame, subtractor)
             contours, _ = cv2.findContours(hot_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             detections = self._detect_hot_billets(contours, width, height)
-            self._evaluate_scene_health(detections, hot_mask, motion_mask)
+            scene_message = self._evaluate_scene_health(detections, hot_mask, motion_mask)
 
             if self.mode == "ZONE_OCCUPANCY":
                 with self.lock:
@@ -186,7 +192,7 @@ class ProductCounter:
             with self.lock:
                 count = self.detected_count
                 confirmed = self.confirmed_count
-                status_text = self.message
+                status_text = scene_message
                 warnings = list(self.warnings)
 
             cv2.putText(annotated, f"Detected: {count}", (18, 36), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
@@ -210,7 +216,7 @@ class ProductCounter:
                 self.frame_size = f"{width}x{height}"
                 self.running = True
                 self.last_frame_at = now
-                self.message = "Monitoring"
+                self.message = scene_message
 
         capture.release()
         with self.lock:
@@ -269,15 +275,36 @@ class ProductCounter:
             detections.append(Detection(rect=(x, y, w, h), center=(x + w // 2, y + h // 2), confidence=confidence, elongation=elongation))
         return detections
 
-    def _evaluate_scene_health(self, detections: List[Detection], hot_mask, motion_mask) -> None:
+    def _evaluate_scene_health(self, detections: List[Detection], hot_mask, motion_mask) -> str:
         warnings: List[dict] = []
+        total_pixels = max(1, hot_mask.shape[0] * hot_mask.shape[1])
         hot_pixels = int(cv2.countNonZero(hot_mask))
         moving_pixels = int(cv2.countNonZero(motion_mask))
+        hot_ratio = hot_pixels / total_pixels
+        moving_ratio = moving_pixels / total_pixels
 
-        if moving_pixels < 80 and self.running:
-            warnings.append({"code": "LOW_CAMERA_MOTION", "severity": "INFO", "message": "Camera feed is live but no conveyor motion is visible."})
+        scene_message = "Waiting for billet"
 
-        if hot_pixels > 0 and not detections:
+        if detections:
+            self.low_confidence_frames = 0
+            self.distorted_frames = 0
+            scene_message = "Billet candidate detected"
+        elif hot_ratio > 0.22:
+            self.distorted_frames += 1
+            self.low_confidence_frames = 0
+            scene_message = "Camera frame unstable"
+        elif hot_ratio > 0.003 and moving_ratio > 0.002:
+            self.low_confidence_frames += 1
+            self.distorted_frames = 0
+            scene_message = "Hot motion under review"
+        else:
+            self.low_confidence_frames = 0
+            self.distorted_frames = 0
+
+        if self.distorted_frames >= 6:
+            warnings.append({"code": "FRAME_DISTORTION", "severity": "WARNING", "message": "Camera image has excessive bright noise or distortion; check stream quality before counting."})
+
+        if self.low_confidence_frames >= 10:
             warnings.append({"code": "LOW_CONFIDENCE", "severity": "WARNING", "message": "Hot movement detected but billet shape was not confirmed."})
 
         if len(detections) > 1:
@@ -292,6 +319,7 @@ class ProductCounter:
         with self.lock:
             existing = [warning for warning in self.warnings if warning.get("code") in {"STALLED_BILLET", "WRONG_DIRECTION"}]
             self.warnings = (warnings + existing)[-4:]
+        return scene_message
 
     def _update_tracks(self, detections: List[Detection], line_y: int) -> None:
         with self.lock:
