@@ -7,6 +7,32 @@ import { AuditLog, Db, Role, Settings, SlipTemplate } from "./types";
 const DATA_DIR = path.join(process.cwd(), "data");
 const DB_PATH = path.join(DATA_DIR, "runtime-db.json");
 
+function isHttpUrl(value: string) {
+  return /^https?:\/\//i.test(value.trim());
+}
+
+function isRtspUrl(value: string) {
+  return /^rtsp:\/\//i.test(value.trim());
+}
+
+function repairAiServiceUrl(db: Db, aiCounting: Settings["aiProductCounting"]) {
+  const serviceUrl = aiCounting.serviceUrl.trim();
+  if (!serviceUrl) return false;
+  if (isHttpUrl(serviceUrl)) {
+    if (serviceUrl === aiCounting.serviceUrl) return false;
+    aiCounting.serviceUrl = serviceUrl;
+    return true;
+  }
+  if (isRtspUrl(serviceUrl)) {
+    const selectedCamera = db.settings.cameras.find((camera) => camera.id === aiCounting.cameraId) || db.settings.cameras[0];
+    if (selectedCamera && !selectedCamera.rtspUrl.trim()) {
+      selectedCamera.rtspUrl = serviceUrl;
+    }
+  }
+  aiCounting.serviceUrl = "";
+  return true;
+}
+
 export function uid(prefix: string) {
   return `${prefix}-${crypto.randomBytes(6).toString("hex")}`;
 }
@@ -252,6 +278,9 @@ export function readDb(): Db {
     }
     if (typeof migratedAiCounting.attachSnapshotToSlip !== "boolean") {
       migratedAiCounting.attachSnapshotToSlip = true;
+      changed = true;
+    }
+    if (repairAiServiceUrl(db, migratedAiCounting)) {
       changed = true;
     }
   }

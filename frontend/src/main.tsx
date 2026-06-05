@@ -1507,7 +1507,11 @@ function QuickAddModal({ kind, saving, error, onClose, onSubmit }: { kind: Quick
 
 function AiProductCounting({ data }: { data: AppData }) {
   const settings = data.settings?.aiProductCounting;
-  const serviceBase = useMemo(() => (settings?.serviceUrl || "").replace(/\/+$/, ""), [settings?.serviceUrl]);
+  const rawServiceUrl = settings?.serviceUrl || "";
+  const serviceBase = useMemo(() => {
+    const trimmed = rawServiceUrl.trim().replace(/\/+$/, "");
+    return /^https?:\/\//i.test(trimmed) ? trimmed : "";
+  }, [rawServiceUrl]);
   const cameras = useMemo(() => (data.settings?.cameras || [])
     .filter((camera) => camera.active)
     .sort((left, right) => left.displayOrder - right.displayOrder), [data.settings?.cameras]);
@@ -1710,7 +1714,7 @@ function AiProductCounting({ data }: { data: AppData }) {
               </select>
             </label>
             <label className="field">AI service URL
-              <input value={settings.serviceUrl || "-"} readOnly />
+              <input value={serviceBase || "Configure in Settings"} readOnly />
             </label>
           </div>
 
@@ -1750,6 +1754,11 @@ function AiProductCounting({ data }: { data: AppData }) {
             onReset={resetCount}
             onConfirm={confirmCount}
           />
+          {!serviceBase && (
+            <p className="ai-module-message warning">
+              Configure the AI service URL in Settings as an HTTP address. Keep the camera RTSP stream in the selected camera settings.
+            </p>
+          )}
           {(serviceError || moduleMessage) && <p className={`ai-module-message ${confirmedCount && !serviceError ? "success" : "warning"}`}>{serviceError || moduleMessage}</p>}
           <section className="ai-open-slips panel">
             <h3>Open Slips</h3>

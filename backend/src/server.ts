@@ -176,13 +176,19 @@ function aiCountingMode(value: unknown): Settings["aiProductCounting"]["counting
   return value === "ZONE_OCCUPANCY" || value === "MANUAL_REVIEW" ? value : "LINE_CROSSING";
 }
 
+function aiServiceUrl(value: string) {
+  const trimmed = value.trim();
+  return /^https?:\/\//i.test(trimmed) ? trimmed : "";
+}
+
 function normalizeAiProductCounting(input: unknown, existing: Settings["aiProductCounting"], cameras: Settings["cameras"]) {
   const value = input && typeof input === "object" ? input as Record<string, unknown> : {};
   const confidenceThreshold = Math.max(1, Math.min(99, Number(value.confidenceThreshold ?? existing.confidenceThreshold ?? 70)));
   const cameraId = text(value.cameraId, existing.cameraId || cameras[0]?.id || "");
+  const serviceUrl = aiServiceUrl(text(value.serviceUrl, existing.serviceUrl || ""));
   return {
     enabled: bool(value.enabled, existing.enabled),
-    serviceUrl: text(value.serviceUrl, existing.serviceUrl || ""),
+    serviceUrl,
     cameraId,
     countingMode: aiCountingMode(value.countingMode ?? existing.countingMode),
     productType: text(value.productType, existing.productType || "Bags / cartons / crates"),
