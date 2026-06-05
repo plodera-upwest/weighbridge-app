@@ -85,7 +85,7 @@ const settings: Settings = {
   slipSearchControlsVisible: false,
   aiProductCounting: {
     enabled: false,
-    serviceUrl: "http://127.0.0.1:5055",
+    serviceUrl: "",
     cameraId: "cam-rear",
     countingMode: "LINE_CROSSING",
     productType: "Bags / cartons / crates",
@@ -212,7 +212,7 @@ export function readDb(): Db {
   if (!migratedAiCounting || typeof migratedAiCounting !== "object") {
     db.settings.aiProductCounting = {
       enabled: false,
-      serviceUrl: "http://127.0.0.1:5055",
+      serviceUrl: "",
       cameraId: db.settings.cameras[0]?.id || "",
       countingMode: "LINE_CROSSING",
       productType: "Bags / cartons / crates",
@@ -227,7 +227,7 @@ export function readDb(): Db {
       changed = true;
     }
     if (typeof migratedAiCounting.serviceUrl !== "string") {
-      migratedAiCounting.serviceUrl = "http://127.0.0.1:5055";
+      migratedAiCounting.serviceUrl = "";
       changed = true;
     }
     if (typeof migratedAiCounting.cameraId !== "string") {

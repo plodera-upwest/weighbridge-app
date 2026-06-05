@@ -18,7 +18,7 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || `http://127.0.0.1:${PORT}
   .filter(Boolean);
 
 app.use((_req, res, next) => {
-  res.setHeader("Content-Security-Policy", "default-src 'self'; img-src 'self' data: http://127.0.0.1:5055 http://localhost:5055; style-src 'self'; script-src 'self'; connect-src 'self' http://127.0.0.1:5055 http://localhost:5055; base-uri 'self'; frame-ancestors 'none'");
+  res.setHeader("Content-Security-Policy", "default-src 'self'; img-src 'self' data: http: https:; style-src 'self'; script-src 'self'; connect-src 'self' http: https:; base-uri 'self'; frame-ancestors 'none'");
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
   res.setHeader("Referrer-Policy", "no-referrer");
@@ -182,7 +182,7 @@ function normalizeAiProductCounting(input: unknown, existing: Settings["aiProduc
   const cameraId = text(value.cameraId, existing.cameraId || cameras[0]?.id || "");
   return {
     enabled: bool(value.enabled, existing.enabled),
-    serviceUrl: text(value.serviceUrl, existing.serviceUrl || "http://127.0.0.1:5055"),
+    serviceUrl: text(value.serviceUrl, existing.serviceUrl || ""),
     cameraId,
     countingMode: aiCountingMode(value.countingMode ?? existing.countingMode),
     productType: text(value.productType, existing.productType || "Bags / cartons / crates"),

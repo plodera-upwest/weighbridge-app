@@ -222,6 +222,27 @@
     background: #ffffff;
   }
 
+  .settings-ai-camera-card {
+    @apply grid gap-3 border p-3;
+    border-color: #d7e2f1;
+    border-radius: 14px;
+    background: linear-gradient(180deg, #f8fbff, #ffffff);
+  }
+
+  .settings-ai-camera-head {
+    @apply flex items-start justify-between gap-3;
+  }
+
+  .settings-ai-camera-head h4 {
+    @apply text-sm font-semibold;
+    color: #0f172a;
+  }
+
+  .settings-ai-camera-head p {
+    @apply mt-0.5 text-xs font-medium;
+    color: #64748b;
+  }
+
   .collapsible-setting-card {
     @apply border p-3;
     border-color: #e3e2e3;
@@ -3086,6 +3107,7 @@
   .wb-card,
   .settings-section-card,
   .camera-setting-card,
+  .settings-ai-camera-card,
   .collapsible-setting-card,
   .app-shell > section:not(.slip-content) > section > header {
     border: 1px solid var(--wb-line) !important;
@@ -3461,6 +3483,7 @@
 
   .settings-section-card,
   .camera-setting-card,
+  .settings-ai-camera-card,
   .collapsible-setting-card {
     padding: 18px !important;
   }

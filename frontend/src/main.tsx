@@ -103,6 +103,21 @@ type SlipTemplate = {
   height: number;
   elements: SlipTemplateElement[];
 };
+
+function cameraStreamUrl(camera: CameraSetting) {
+  const rawUrl = camera.rtspUrl.trim();
+  if (!rawUrl || !camera.username.trim()) return rawUrl;
+  try {
+    const url = new URL(rawUrl);
+    if (url.username || url.protocol.toLowerCase() !== "rtsp:") return rawUrl;
+    url.username = camera.username.trim();
+    url.password = camera.password || "";
+    return url.toString();
+  } catch {
+    return rawUrl;
+  }
+}
+
 type Transaction = {
   id: string;
   transactionNo: string;
@@ -1547,7 +1562,7 @@ function AiProductCounting({ data }: { data: AppData }) {
   const aiFetch = async (path: string, init?: RequestInit) => {
     if (!serviceBase) throw new Error("AI service URL is not configured.");
     if (!/^https?:\/\//i.test(serviceBase)) {
-      throw new Error("AI service URL must be an HTTP address like http://127.0.0.1:5055. Put the RTSP camera URL in Camera Settings instead.");
+      throw new Error("AI service URL must be an HTTP address for the local AI service. Put the RTSP camera stream in the selected camera settings instead.");
     }
     const response = await fetch(`${serviceBase}${path}`, {
       ...init,
@@ -1600,7 +1615,7 @@ function AiProductCounting({ data }: { data: AppData }) {
       const status = await aiFetch("/api/counting/start", {
         method: "POST",
         body: JSON.stringify({
-          rtspUrl: selectedCamera.rtspUrl || undefined,
+          rtspUrl: cameraStreamUrl(selectedCamera) || undefined,
           mode: settings?.countingMode || "LINE_CROSSING",
           productType: selectedProduct?.name || selectedSlip.plannedProductName || settings?.productType || "Billets",
           confidenceThreshold: settings?.confidenceThreshold || 70
@@ -2264,7 +2279,7 @@ function Settings({ settings, disabled, onRefresh }: { settings: Settings; disab
   const [searchControlsVisible, setSearchControlsVisible] = useState(Boolean(settings.slipSearchControlsVisible));
   const [aiProductCounting, setAiProductCounting] = useState<AiProductCountingSettings>(() => ({
     enabled: Boolean(settings.aiProductCounting?.enabled),
-    serviceUrl: settings.aiProductCounting?.serviceUrl || "http://127.0.0.1:5055",
+    serviceUrl: settings.aiProductCounting?.serviceUrl || "",
     cameraId: settings.aiProductCounting?.cameraId || settings.cameras[0]?.id || "",
     countingMode: settings.aiProductCounting?.countingMode || "LINE_CROSSING",
     productType: settings.aiProductCounting?.productType || "Bags / cartons / crates",
@@ -2293,7 +2308,7 @@ function Settings({ settings, disabled, onRefresh }: { settings: Settings; disab
     setSearchControlsVisible(Boolean(settings.slipSearchControlsVisible));
     setAiProductCounting({
       enabled: Boolean(settings.aiProductCounting?.enabled),
-      serviceUrl: settings.aiProductCounting?.serviceUrl || "http://127.0.0.1:5055",
+      serviceUrl: settings.aiProductCounting?.serviceUrl || "",
       cameraId: settings.aiProductCounting?.cameraId || settings.cameras[0]?.id || "",
       countingMode: settings.aiProductCounting?.countingMode || "LINE_CROSSING",
       productType: settings.aiProductCounting?.productType || "Bags / cartons / crates",
@@ -2395,6 +2410,28 @@ function Settings({ settings, disabled, onRefresh }: { settings: Settings; disab
 
   const updateAiProductCounting = (changes: Partial<AiProductCountingSettings>) => {
     setAiProductCounting((current) => ({ ...current, ...changes }));
+  };
+
+  const selectedAiCamera = cameras.find((camera) => camera.id === aiProductCounting.cameraId) || null;
+
+  const addAiCountingCamera = () => {
+    const id = `cam-ai-${Date.now()}`;
+    const nextCamera: CameraSetting = {
+      id,
+      name: "AI Counting Camera",
+      classification: "AI Product Counting",
+      position: "FRONT",
+      rtspUrl: "",
+      username: "",
+      password: "",
+      captureTiming: "BOTH",
+      displayOnSlip: false,
+      displayOrder: cameras.length + 1,
+      active: true
+    };
+    setCameras((current) => [...current, nextCamera]);
+    setAiProductCounting((current) => ({ ...current, cameraId: id }));
+    setExpandedCameraIds((current) => [...current, id]);
   };
 
   const save = async (event: FormEvent<HTMLFormElement>) => {
@@ -2554,7 +2591,7 @@ function Settings({ settings, disabled, onRefresh }: { settings: Settings; disab
                 <div className="grid grid-cols-4 gap-3 max-xl:grid-cols-2 max-sm:grid-cols-1">
                   <label className="field">AI service URL<input value={aiProductCounting.serviceUrl} onChange={(event) => updateAiProductCounting({ serviceUrl: event.target.value })} placeholder="http://127.0.0.1:5055" /></label>
                   <label className="field">Counting camera<select value={aiProductCounting.cameraId} onChange={(event) => updateAiProductCounting({ cameraId: event.target.value })}>
-                    <option value="">Default slip camera</option>
+                    <option value="">Select counting camera</option>
                     {cameras.map((camera) => <option key={camera.id} value={camera.id}>{camera.name}</option>)}
                   </select></label>
                   <label className="field">Counting mode<select value={aiProductCounting.countingMode} onChange={(event) => updateAiProductCounting({ countingMode: event.target.value as AiProductCountingSettings["countingMode"] })}>
@@ -2565,8 +2602,57 @@ function Settings({ settings, disabled, onRefresh }: { settings: Settings; disab
                   <label className="field">Product type<input value={aiProductCounting.productType} onChange={(event) => updateAiProductCounting({ productType: event.target.value })} placeholder="Bags / cartons / crates" /></label>
                   <label className="field">Confidence threshold<input type="number" min={1} max={99} value={aiProductCounting.confidenceThreshold} onChange={(event) => updateAiProductCounting({ confidenceThreshold: Number(event.target.value) })} /></label>
                 </div>
+                {aiProductCounting.serviceUrl.trim().toLowerCase().startsWith("rtsp://") && (
+                  <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900">
+                    AI service URL must be an HTTP address for the local vision service. Put the RTSP stream below under Selected Counting Camera.
+                  </p>
+                )}
+                <div className="settings-ai-camera-card">
+                  <div className="settings-ai-camera-head">
+                    <div>
+                      <h4>Selected Counting Camera</h4>
+                      <p>Configure the camera used by the AI counting operator module.</p>
+                    </div>
+                    <button className="btn-secondary min-h-8 px-3 py-1 text-sm" type="button" onClick={addAiCountingCamera} disabled={disabled}>Add AI Camera</button>
+                  </div>
+                  {selectedAiCamera ? (
+                    <>
+                      <div className="grid grid-cols-4 gap-3 max-xl:grid-cols-2 max-sm:grid-cols-1">
+                        <label className="field">Camera name<input value={selectedAiCamera.name} onChange={(event) => updateCamera(selectedAiCamera.id, { name: event.target.value })} /></label>
+                        <label className="field">Classification<input value={selectedAiCamera.classification} onChange={(event) => updateCamera(selectedAiCamera.id, { classification: event.target.value })} /></label>
+                        <label className="field">Position<select value={selectedAiCamera.position} onChange={(event) => updateCamera(selectedAiCamera.id, { position: event.target.value as CameraPosition })}>
+                          <option value="FRONT">Front</option>
+                          <option value="REAR">Rear</option>
+                          <option value="SIDE">Side</option>
+                        </select></label>
+                        <label className="field">Capture timing<select value={selectedAiCamera.captureTiming} onChange={(event) => updateCamera(selectedAiCamera.id, { captureTiming: event.target.value as CameraSetting["captureTiming"] })}>
+                          <option value="FIRST">1st Weight only</option>
+                          <option value="FINAL">2nd Weight only</option>
+                          <option value="BOTH">1st and 2nd Weight</option>
+                        </select></label>
+                        <label className="field col-span-2 max-xl:col-span-1">RTSP URL<input value={selectedAiCamera.rtspUrl} onChange={(event) => updateCamera(selectedAiCamera.id, { rtspUrl: event.target.value })} placeholder="rtsp://user:password@camera-ip:554/stream1" /></label>
+                        <label className="field">Username<input value={selectedAiCamera.username} onChange={(event) => updateCamera(selectedAiCamera.id, { username: event.target.value })} placeholder="admin" /></label>
+                        <label className="field">Password<input type="password" value={selectedAiCamera.password} onChange={(event) => updateCamera(selectedAiCamera.id, { password: event.target.value })} placeholder="Camera password" /></label>
+                      </div>
+                      <div className="flex flex-wrap gap-3 text-sm text-slate-700">
+                        <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 font-medium">
+                          <input type="checkbox" checked={selectedAiCamera.active} onChange={(event) => updateCamera(selectedAiCamera.id, { active: event.target.checked })} />
+                          Camera active
+                        </label>
+                        <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 font-medium">
+                          <input type="checkbox" checked={selectedAiCamera.displayOnSlip} onChange={(event) => updateCamera(selectedAiCamera.id, { displayOnSlip: event.target.checked })} />
+                          Display and capture on Weighbridge Slip
+                        </label>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="rounded-md border border-dashed border-slate-300 bg-white px-3 py-3 text-sm font-semibold text-slate-600">
+                      Select an existing camera or click Add AI Camera to configure a dedicated counting camera.
+                    </p>
+                  )}
+                </div>
                 <p className="rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-900">
-                  The current panel uses a simulator so the workflow is ready. The AI service URL is reserved for the local vision service when cameras and models are connected.
+                  Keep AI service URL as an HTTP address, for example http://127.0.0.1:5055. Keep the camera stream as an RTSP URL in the selected camera settings.
                 </p>
               </div>
             )}
