@@ -4906,6 +4906,83 @@
   gap: 8px;
 }
 
+.app-shell.ai-app > .app-content.ai-content {
+  height: 100vh !important;
+  overflow: hidden !important;
+}
+
+.app-shell.ai-app .ai-module-page {
+  height: 100%;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 14px;
+}
+
+.app-shell.ai-app .ai-module-page > header {
+  min-height: 78px;
+  padding: 18px 28px;
+}
+
+.app-shell.ai-app .ai-module-layout {
+  min-height: 0;
+  height: 100%;
+  align-items: stretch;
+}
+
+.app-shell.ai-app .ai-module-main,
+.app-shell.ai-app .ai-module-side {
+  min-height: 0;
+}
+
+.app-shell.ai-app .ai-module-main {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  padding: 20px;
+}
+
+.app-shell.ai-app .ai-module-header {
+  margin-bottom: 12px;
+}
+
+.app-shell.ai-app .ai-module-controls {
+  margin-bottom: 12px;
+}
+
+.app-shell.ai-app .ai-camera-stage {
+  min-height: 0;
+}
+
+.app-shell.ai-app .ai-camera-stage .camera-live-grid,
+.app-shell.ai-app .ai-camera-stage .camera-live-grid figure,
+.app-shell.ai-app .ai-camera-stage .camera-frame,
+.app-shell.ai-app .ai-service-preview,
+.app-shell.ai-app .ai-service-preview img {
+  max-height: 100%;
+}
+
+.app-shell.ai-app .ai-module-meta {
+  margin-top: 12px;
+}
+
+.app-shell.ai-app .ai-module-side {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  align-content: stretch;
+  overflow: hidden;
+}
+
+.app-shell.ai-app .ai-open-slips {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.app-shell.ai-app .ai-open-slip-list {
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
 .ai-open-slip-list button {
   display: grid;
   gap: 3px;

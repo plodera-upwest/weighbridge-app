@@ -489,8 +489,21 @@ function App() {
     "Settings"
   ];
 
+  const shellClassName = [
+    "app-shell",
+    active === "Weighbridge Slip" ? "slip-app" : "",
+    active === "AI Product Counting" ? "ai-app" : ""
+  ].filter(Boolean).join(" ");
+  const contentClassName = [
+    "app-content",
+    "min-w-0",
+    "p-6",
+    active === "Weighbridge Slip" ? "slip-content" : "",
+    active === "AI Product Counting" ? "ai-content" : ""
+  ].filter(Boolean).join(" ");
+
   return (
-    <main className={`app-shell ${active === "Weighbridge Slip" ? "slip-app" : ""}`}>
+    <main className={shellClassName}>
       <aside className="app-sidebar sticky top-0 flex h-screen flex-col gap-6 border-r border-slate-200 bg-white p-5 max-lg:static max-lg:h-auto">
         <div className="brand flex items-center gap-3">
           <div className="brand-mark grid h-12 w-12 place-items-center rounded-md bg-teal-700 font-semibold text-white">
@@ -523,7 +536,7 @@ function App() {
         </div>
       </aside>
 
-      <section className={`app-content min-w-0 p-6 ${active === "Weighbridge Slip" ? "slip-content" : ""}`}>
+      <section className={contentClassName}>
         {systemError && (
           <div className="app-error-banner" role="alert">
             <span>{systemError}</span>
@@ -1777,7 +1790,7 @@ function AiProductCounting({ data }: { data: AppData }) {
               <p>No open slips are waiting for counting.</p>
             ) : (
               <div className="ai-open-slip-list">
-                {openSlips.slice(0, 6).map((transaction) => (
+                {openSlips.map((transaction) => (
                   <button key={transaction.id} type="button" className={selectedSlipId === transaction.id ? "active" : ""} onClick={() => {
                     setSelectedSlipId(transaction.id);
                     resetCount();
