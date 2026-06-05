@@ -475,6 +475,7 @@ function App() {
   const primaryMenu = [
     "Dashboard",
     "Weighbridge Slip",
+    ...(data.settings.aiProductCounting?.enabled ? ["AI Product Counting"] : []),
     "Vehicles",
     "Drivers",
     "Customers",
@@ -484,7 +485,6 @@ function App() {
   const utilityMenu = [
     "Audit Logs",
     "Users",
-    ...(data.settings.aiProductCounting?.enabled ? ["AI Product Counting"] : []),
     "Slip Designer",
     "Settings"
   ];
