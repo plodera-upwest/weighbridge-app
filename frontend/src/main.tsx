@@ -1546,6 +1546,9 @@ function AiProductCounting({ data }: { data: AppData }) {
 
   const aiFetch = async (path: string, init?: RequestInit) => {
     if (!serviceBase) throw new Error("AI service URL is not configured.");
+    if (!/^https?:\/\//i.test(serviceBase)) {
+      throw new Error("AI service URL must be an HTTP address like http://127.0.0.1:5055. Put the RTSP camera URL in Camera Settings instead.");
+    }
     const response = await fetch(`${serviceBase}${path}`, {
       ...init,
       headers: {
