@@ -118,6 +118,21 @@ function cameraStreamUrl(camera: CameraSetting) {
   }
 }
 
+function cleanHttpUrl(value: string) {
+  const trimmed = value.trim().replace(/\/+$/, "");
+  return /^https?:\/\//i.test(trimmed) ? trimmed : "";
+}
+
+function localAiServiceUrl() {
+  if (typeof window === "undefined") return "";
+  const hostname = window.location.hostname || "127.0.0.1";
+  const localHost = hostname === "localhost" ? "127.0.0.1" : hostname === "::1" ? "[::1]" : hostname;
+  if (["127.0.0.1", "localhost", "::1"].includes(hostname) || window.location.protocol === "http:") {
+    return `http://${localHost}:5055`;
+  }
+  return "";
+}
+
 type Transaction = {
   id: string;
   transactionNo: string;
@@ -1508,10 +1523,10 @@ function QuickAddModal({ kind, saving, error, onClose, onSubmit }: { kind: Quick
 function AiProductCounting({ data }: { data: AppData }) {
   const settings = data.settings?.aiProductCounting;
   const rawServiceUrl = settings?.serviceUrl || "";
-  const serviceBase = useMemo(() => {
-    const trimmed = rawServiceUrl.trim().replace(/\/+$/, "");
-    return /^https?:\/\//i.test(trimmed) ? trimmed : "";
-  }, [rawServiceUrl]);
+  const configuredServiceBase = useMemo(() => cleanHttpUrl(rawServiceUrl), [rawServiceUrl]);
+  const defaultServiceBase = useMemo(() => localAiServiceUrl(), []);
+  const serviceBase = configuredServiceBase || defaultServiceBase;
+  const usingDefaultService = !configuredServiceBase && Boolean(defaultServiceBase);
   const cameras = useMemo(() => (data.settings?.cameras || [])
     .filter((camera) => camera.active)
     .sort((left, right) => left.displayOrder - right.displayOrder), [data.settings?.cameras]);
@@ -1714,7 +1729,7 @@ function AiProductCounting({ data }: { data: AppData }) {
               </select>
             </label>
             <label className="field">AI service URL
-              <input value={serviceBase || "Configure in Settings"} readOnly />
+              <input value={serviceBase ? `${usingDefaultService ? "Local default: " : ""}${serviceBase}` : "Configure in Settings"} readOnly />
             </label>
           </div>
 
