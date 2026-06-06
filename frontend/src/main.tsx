@@ -66,6 +66,18 @@ type AiProductCountingSettings = {
   countingMode: "LINE_CROSSING" | "ZONE_OCCUPANCY" | "MANUAL_REVIEW";
   productType: string;
   confidenceThreshold: number;
+  minBoxWidth: number;
+  maxBoxWidth: number;
+  minBoxHeight: number;
+  maxBoxHeight: number;
+  minAspectRatio: number;
+  maxAspectRatio: number;
+  countGateRatio: number;
+  movementDirection: "AUTO" | "LEFT_TO_RIGHT" | "RIGHT_TO_LEFT";
+  trackingTimeoutFrames: number;
+  duplicateWindowSeconds: number;
+  conveyorRoi: string;
+  ignoreZones: string;
   requireOperatorConfirmation: boolean;
   attachSnapshotToSlip: boolean;
 };
@@ -138,6 +150,81 @@ function localAiServiceUrl() {
     return `http://${localHost}:5055`;
   }
   return "";
+}
+
+const DEFAULT_CONVEYOR_ROI = "0.04,0.24; 0.78,0.20; 0.97,0.86; 0.06,0.88";
+const DEFAULT_IGNORE_ZONES = "0,0; 1,0; 1,0.18; 0,0.18\n0.84,0.48; 1,0.48; 1,1; 0.84,1";
+
+function numberOrDefault(value: unknown, fallback: number) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function aiCountingDefaults(input?: Partial<AiProductCountingSettings>, fallbackCameraId = ""): AiProductCountingSettings {
+  return {
+    enabled: Boolean(input?.enabled),
+    serviceUrl: input?.serviceUrl || "",
+    cameraId: input?.cameraId || fallbackCameraId,
+    countingMode: input?.countingMode || "LINE_CROSSING",
+    productType: input?.productType || "Bags / cartons / crates",
+    confidenceThreshold: numberOrDefault(input?.confidenceThreshold, 70),
+    minBoxWidth: numberOrDefault(input?.minBoxWidth, 35),
+    maxBoxWidth: numberOrDefault(input?.maxBoxWidth, 620),
+    minBoxHeight: numberOrDefault(input?.minBoxHeight, 8),
+    maxBoxHeight: numberOrDefault(input?.maxBoxHeight, 140),
+    minAspectRatio: numberOrDefault(input?.minAspectRatio, 3),
+    maxAspectRatio: numberOrDefault(input?.maxAspectRatio, 28),
+    countGateRatio: numberOrDefault(input?.countGateRatio, 0.62),
+    movementDirection: input?.movementDirection || "AUTO",
+    trackingTimeoutFrames: numberOrDefault(input?.trackingTimeoutFrames, 45),
+    duplicateWindowSeconds: numberOrDefault(input?.duplicateWindowSeconds, 20),
+    conveyorRoi: input?.conveyorRoi || DEFAULT_CONVEYOR_ROI,
+    ignoreZones: input?.ignoreZones || DEFAULT_IGNORE_ZONES,
+    requireOperatorConfirmation: input?.requireOperatorConfirmation ?? true,
+    attachSnapshotToSlip: input?.attachSnapshotToSlip ?? true
+  };
+}
+
+function parsePolygon(value: string) {
+  const points = value
+    .split(";")
+    .map((point) => point.trim())
+    .filter(Boolean)
+    .map((point) => {
+      const [xValue, yValue] = point.split(",").map((part) => Number(part.trim()));
+      if (!Number.isFinite(xValue) || !Number.isFinite(yValue)) return null;
+      return {
+        x: Math.max(0, Math.min(1, xValue)),
+        y: Math.max(0, Math.min(1, yValue))
+      };
+    })
+    .filter((point): point is { x: number; y: number } => Boolean(point));
+  return points.length >= 3 ? points : undefined;
+}
+
+function parseIgnoreZones(value: string) {
+  const zones = value
+    .split(/\n+/)
+    .map((zone) => parsePolygon(zone))
+    .filter((zone): zone is { x: number; y: number }[] => Boolean(zone));
+  return zones.length ? zones : undefined;
+}
+
+function aiCountingFilters(settings: AiProductCountingSettings) {
+  return {
+    minWidth: settings.minBoxWidth,
+    maxWidth: settings.maxBoxWidth,
+    minHeight: settings.minBoxHeight,
+    maxHeight: settings.maxBoxHeight,
+    minAspectRatio: settings.minAspectRatio,
+    maxAspectRatio: settings.maxAspectRatio,
+    countGateRatio: settings.countGateRatio,
+    movementDirection: settings.movementDirection,
+    trackingTimeoutFrames: settings.trackingTimeoutFrames,
+    duplicateWindowSeconds: settings.duplicateWindowSeconds,
+    conveyorRoi: parsePolygon(settings.conveyorRoi),
+    ignoreZones: parseIgnoreZones(settings.ignoreZones)
+  };
 }
 
 type Transaction = {
@@ -1657,7 +1744,8 @@ function AiProductCounting({ data }: { data: AppData }) {
           rtspUrl: cameraStreamUrl(selectedCamera) || undefined,
           mode: settings?.countingMode || "LINE_CROSSING",
           productType: selectedProduct?.name || selectedSlip.plannedProductName || settings?.productType || "Billets",
-          confidenceThreshold: settings?.confidenceThreshold || 70
+          confidenceThreshold: settings?.confidenceThreshold || 70,
+          filters: settings ? aiCountingFilters(settings) : undefined
         })
       });
       setServiceStatus(status);
@@ -2339,16 +2427,7 @@ function Settings({ settings, disabled, onRefresh }: { settings: Settings; disab
   const [shiftVisible, setShiftVisible] = useState(Boolean(settings.slipShiftVisible));
   const [selectVehicleVisible, setSelectVehicleVisible] = useState(Boolean(settings.slipSelectVehicleVisible));
   const [searchControlsVisible, setSearchControlsVisible] = useState(Boolean(settings.slipSearchControlsVisible));
-  const [aiProductCounting, setAiProductCounting] = useState<AiProductCountingSettings>(() => ({
-    enabled: Boolean(settings.aiProductCounting?.enabled),
-    serviceUrl: settings.aiProductCounting?.serviceUrl || "",
-    cameraId: settings.aiProductCounting?.cameraId || settings.cameras[0]?.id || "",
-    countingMode: settings.aiProductCounting?.countingMode || "LINE_CROSSING",
-    productType: settings.aiProductCounting?.productType || "Bags / cartons / crates",
-    confidenceThreshold: Number(settings.aiProductCounting?.confidenceThreshold || 70),
-    requireOperatorConfirmation: settings.aiProductCounting?.requireOperatorConfirmation ?? true,
-    attachSnapshotToSlip: settings.aiProductCounting?.attachSnapshotToSlip ?? true
-  }));
+  const [aiProductCounting, setAiProductCounting] = useState<AiProductCountingSettings>(() => aiCountingDefaults(settings.aiProductCounting, settings.cameras[0]?.id || ""));
   const [collapsedSettingsSections, setCollapsedSettingsSections] = useState({
     slipEntry: true,
     aiCounting: true,
@@ -2368,16 +2447,7 @@ function Settings({ settings, disabled, onRefresh }: { settings: Settings; disab
     setShiftVisible(Boolean(settings.slipShiftVisible));
     setSelectVehicleVisible(Boolean(settings.slipSelectVehicleVisible));
     setSearchControlsVisible(Boolean(settings.slipSearchControlsVisible));
-    setAiProductCounting({
-      enabled: Boolean(settings.aiProductCounting?.enabled),
-      serviceUrl: settings.aiProductCounting?.serviceUrl || "",
-      cameraId: settings.aiProductCounting?.cameraId || settings.cameras[0]?.id || "",
-      countingMode: settings.aiProductCounting?.countingMode || "LINE_CROSSING",
-      productType: settings.aiProductCounting?.productType || "Bags / cartons / crates",
-      confidenceThreshold: Number(settings.aiProductCounting?.confidenceThreshold || 70),
-      requireOperatorConfirmation: settings.aiProductCounting?.requireOperatorConfirmation ?? true,
-      attachSnapshotToSlip: settings.aiProductCounting?.attachSnapshotToSlip ?? true
-    });
+    setAiProductCounting(aiCountingDefaults(settings.aiProductCounting, settings.cameras[0]?.id || ""));
   }, [settings]);
 
   const updateWeighbridge = (id: string, changes: Partial<WeighbridgeSetting>) => {
@@ -2663,6 +2733,34 @@ function Settings({ settings, disabled, onRefresh }: { settings: Settings; disab
                   </select></label>
                   <label className="field">Product type<input value={aiProductCounting.productType} onChange={(event) => updateAiProductCounting({ productType: event.target.value })} placeholder="Bags / cartons / crates" /></label>
                   <label className="field">Confidence threshold<input type="number" min={1} max={99} value={aiProductCounting.confidenceThreshold} onChange={(event) => updateAiProductCounting({ confidenceThreshold: Number(event.target.value) })} /></label>
+                </div>
+                <div className="grid grid-cols-6 gap-3 max-xl:grid-cols-3 max-sm:grid-cols-1">
+                  <label className="field">Min width<input type="number" min={10} max={900} value={aiProductCounting.minBoxWidth} onChange={(event) => updateAiProductCounting({ minBoxWidth: Number(event.target.value) })} /></label>
+                  <label className="field">Max width<input type="number" min={10} max={960} value={aiProductCounting.maxBoxWidth} onChange={(event) => updateAiProductCounting({ maxBoxWidth: Number(event.target.value) })} /></label>
+                  <label className="field">Min height<input type="number" min={4} max={300} value={aiProductCounting.minBoxHeight} onChange={(event) => updateAiProductCounting({ minBoxHeight: Number(event.target.value) })} /></label>
+                  <label className="field">Max height<input type="number" min={4} max={500} value={aiProductCounting.maxBoxHeight} onChange={(event) => updateAiProductCounting({ maxBoxHeight: Number(event.target.value) })} /></label>
+                  <label className="field">Min aspect<input type="number" min={1.2} max={40} step={0.1} value={aiProductCounting.minAspectRatio} onChange={(event) => updateAiProductCounting({ minAspectRatio: Number(event.target.value) })} /></label>
+                  <label className="field">Max aspect<input type="number" min={1.2} max={80} step={0.1} value={aiProductCounting.maxAspectRatio} onChange={(event) => updateAiProductCounting({ maxAspectRatio: Number(event.target.value) })} /></label>
+                </div>
+                <div className="grid grid-cols-4 gap-3 max-xl:grid-cols-2 max-sm:grid-cols-1">
+                  <label className="field">Count line position<input type="number" min={0.1} max={0.9} step={0.01} value={aiProductCounting.countGateRatio} onChange={(event) => updateAiProductCounting({ countGateRatio: Number(event.target.value) })} /></label>
+                  <label className="field">Movement direction<select value={aiProductCounting.movementDirection} onChange={(event) => updateAiProductCounting({ movementDirection: event.target.value as AiProductCountingSettings["movementDirection"] })}>
+                    <option value="AUTO">Auto learn</option>
+                    <option value="LEFT_TO_RIGHT">Left to right</option>
+                    <option value="RIGHT_TO_LEFT">Right to left</option>
+                  </select></label>
+                  <label className="field">Tracking timeout<input type="number" min={10} max={240} value={aiProductCounting.trackingTimeoutFrames} onChange={(event) => updateAiProductCounting({ trackingTimeoutFrames: Number(event.target.value) })} /></label>
+                  <label className="field">Duplicate window<input type="number" min={2} max={120} value={aiProductCounting.duplicateWindowSeconds} onChange={(event) => updateAiProductCounting({ duplicateWindowSeconds: Number(event.target.value) })} /></label>
+                </div>
+                <div className="grid grid-cols-2 gap-3 max-lg:grid-cols-1">
+                  <label className="field">Conveyor ROI editor
+                    <textarea rows={3} value={aiProductCounting.conveyorRoi} onChange={(event) => updateAiProductCounting({ conveyorRoi: event.target.value })} />
+                    <span className="text-xs font-medium text-slate-500">Use normalized x,y points separated by semicolons. Only this belt polygon is counted.</span>
+                  </label>
+                  <label className="field">Ignore zone editor
+                    <textarea rows={3} value={aiProductCounting.ignoreZones} onChange={(event) => updateAiProductCounting({ ignoreZones: event.target.value })} />
+                    <span className="text-xs font-medium text-slate-500">Use one polygon per line for walkways, crane paths, or upper lifting zones.</span>
+                  </label>
                 </div>
                 {aiProductCounting.serviceUrl.trim().toLowerCase().startsWith("rtsp://") && (
                   <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900">

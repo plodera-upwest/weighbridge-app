@@ -126,6 +126,18 @@ export type Settings = {
     countingMode: "LINE_CROSSING" | "ZONE_OCCUPANCY" | "MANUAL_REVIEW";
     productType: string;
     confidenceThreshold: number;
+    minBoxWidth: number;
+    maxBoxWidth: number;
+    minBoxHeight: number;
+    maxBoxHeight: number;
+    minAspectRatio: number;
+    maxAspectRatio: number;
+    countGateRatio: number;
+    movementDirection: "AUTO" | "LEFT_TO_RIGHT" | "RIGHT_TO_LEFT";
+    trackingTimeoutFrames: number;
+    duplicateWindowSeconds: number;
+    conveyorRoi: string;
+    ignoreZones: string;
     requireOperatorConfirmation: boolean;
     attachSnapshotToSlip: boolean;
   };

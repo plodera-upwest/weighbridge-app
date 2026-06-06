@@ -6,6 +6,8 @@ import { AuditLog, Db, Role, Settings, SlipTemplate } from "./types";
 
 const DATA_DIR = path.join(process.cwd(), "data");
 const DB_PATH = path.join(DATA_DIR, "runtime-db.json");
+const DEFAULT_AI_CONVEYOR_ROI = "0.04,0.24; 0.78,0.20; 0.97,0.86; 0.06,0.88";
+const DEFAULT_AI_IGNORE_ZONES = "0,0; 1,0; 1,0.18; 0,0.18\n0.84,0.48; 1,0.48; 1,1; 0.84,1";
 
 function isHttpUrl(value: string) {
   return /^https?:\/\//i.test(value.trim());
@@ -116,6 +118,18 @@ const settings: Settings = {
     countingMode: "LINE_CROSSING",
     productType: "Bags / cartons / crates",
     confidenceThreshold: 70,
+    minBoxWidth: 35,
+    maxBoxWidth: 620,
+    minBoxHeight: 8,
+    maxBoxHeight: 140,
+    minAspectRatio: 3,
+    maxAspectRatio: 28,
+    countGateRatio: 0.62,
+    movementDirection: "AUTO",
+    trackingTimeoutFrames: 45,
+    duplicateWindowSeconds: 20,
+    conveyorRoi: DEFAULT_AI_CONVEYOR_ROI,
+    ignoreZones: DEFAULT_AI_IGNORE_ZONES,
     requireOperatorConfirmation: true,
     attachSnapshotToSlip: true
   },
@@ -243,6 +257,18 @@ export function readDb(): Db {
       countingMode: "LINE_CROSSING",
       productType: "Bags / cartons / crates",
       confidenceThreshold: 70,
+      minBoxWidth: 35,
+      maxBoxWidth: 620,
+      minBoxHeight: 8,
+      maxBoxHeight: 140,
+      minAspectRatio: 3,
+      maxAspectRatio: 28,
+      countGateRatio: 0.62,
+      movementDirection: "AUTO",
+      trackingTimeoutFrames: 45,
+      duplicateWindowSeconds: 20,
+      conveyorRoi: DEFAULT_AI_CONVEYOR_ROI,
+      ignoreZones: DEFAULT_AI_IGNORE_ZONES,
       requireOperatorConfirmation: true,
       attachSnapshotToSlip: true
     };
@@ -270,6 +296,54 @@ export function readDb(): Db {
     }
     if (!Number.isFinite(migratedAiCounting.confidenceThreshold)) {
       migratedAiCounting.confidenceThreshold = 70;
+      changed = true;
+    }
+    if (!Number.isFinite(migratedAiCounting.minBoxWidth)) {
+      migratedAiCounting.minBoxWidth = 35;
+      changed = true;
+    }
+    if (!Number.isFinite(migratedAiCounting.maxBoxWidth)) {
+      migratedAiCounting.maxBoxWidth = 620;
+      changed = true;
+    }
+    if (!Number.isFinite(migratedAiCounting.minBoxHeight)) {
+      migratedAiCounting.minBoxHeight = 8;
+      changed = true;
+    }
+    if (!Number.isFinite(migratedAiCounting.maxBoxHeight)) {
+      migratedAiCounting.maxBoxHeight = 140;
+      changed = true;
+    }
+    if (!Number.isFinite(migratedAiCounting.minAspectRatio)) {
+      migratedAiCounting.minAspectRatio = 3;
+      changed = true;
+    }
+    if (!Number.isFinite(migratedAiCounting.maxAspectRatio)) {
+      migratedAiCounting.maxAspectRatio = 28;
+      changed = true;
+    }
+    if (!Number.isFinite(migratedAiCounting.countGateRatio)) {
+      migratedAiCounting.countGateRatio = 0.62;
+      changed = true;
+    }
+    if (!["AUTO", "LEFT_TO_RIGHT", "RIGHT_TO_LEFT"].includes(migratedAiCounting.movementDirection)) {
+      migratedAiCounting.movementDirection = "AUTO";
+      changed = true;
+    }
+    if (!Number.isFinite(migratedAiCounting.trackingTimeoutFrames)) {
+      migratedAiCounting.trackingTimeoutFrames = 45;
+      changed = true;
+    }
+    if (!Number.isFinite(migratedAiCounting.duplicateWindowSeconds)) {
+      migratedAiCounting.duplicateWindowSeconds = 20;
+      changed = true;
+    }
+    if (typeof migratedAiCounting.conveyorRoi !== "string") {
+      migratedAiCounting.conveyorRoi = DEFAULT_AI_CONVEYOR_ROI;
+      changed = true;
+    }
+    if (typeof migratedAiCounting.ignoreZones !== "string") {
+      migratedAiCounting.ignoreZones = DEFAULT_AI_IGNORE_ZONES;
       changed = true;
     }
     if (typeof migratedAiCounting.requireOperatorConfirmation !== "boolean") {

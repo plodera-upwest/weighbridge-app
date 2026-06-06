@@ -17,11 +17,32 @@ from pydantic import BaseModel
 import uvicorn
 
 
+class PointRequest(BaseModel):
+    x: float
+    y: float
+
+
+class CountingFilters(BaseModel):
+    minWidth: Optional[int] = None
+    maxWidth: Optional[int] = None
+    minHeight: Optional[int] = None
+    maxHeight: Optional[int] = None
+    minAspectRatio: Optional[float] = None
+    maxAspectRatio: Optional[float] = None
+    countGateRatio: Optional[float] = None
+    movementDirection: Optional[str] = None
+    trackingTimeoutFrames: Optional[int] = None
+    duplicateWindowSeconds: Optional[float] = None
+    conveyorRoi: Optional[List[PointRequest]] = None
+    ignoreZones: Optional[List[List[PointRequest]]] = None
+
+
 class StartRequest(BaseModel):
     rtspUrl: Optional[str] = None
     mode: str = "LINE_CROSSING"
     productType: str = "Billets"
     confidenceThreshold: int = 70
+    filters: Optional[CountingFilters] = None
 
 
 @dataclass
@@ -43,6 +64,8 @@ class Detection:
     center: Tuple[int, int]
     confidence: int
     elongation: float
+    box: Tuple[Tuple[int, int], Tuple[int, int], Tuple[int, int], Tuple[int, int]]
+    track_id: Optional[int] = None
 
 
 class ProductCounter:
@@ -73,8 +96,18 @@ class ProductCounter:
         self.duplicate_window_seconds = self._configured_float("AI_DUPLICATE_WINDOW_SECONDS", 20.0, 3.0, 90.0)
         self.duplicate_y_tolerance = int(self._configured_float("AI_DUPLICATE_Y_TOLERANCE", 45.0, 15.0, 140.0))
         self.recent_gate_counts: List[Tuple[int, int]] = []
+        self.min_box_width = 35
+        self.max_box_width = 620
+        self.min_box_height = 8
+        self.max_box_height = 140
+        self.min_aspect_ratio = 3.0
+        self.max_aspect_ratio = 28.0
+        self.movement_direction = "AUTO"
+        self.tracking_timeout_frames = 45
+        self.conveyor_roi = self._default_conveyor_roi()
+        self.ignore_zones = self._default_ignore_zones()
 
-    def start(self, rtsp_url: str, mode: str, product_type: str, confidence_threshold: int) -> None:
+    def start(self, rtsp_url: str, mode: str, product_type: str, confidence_threshold: int, filters: Optional[CountingFilters] = None) -> None:
         if cv2 is None or np is None:
             raise RuntimeError("OpenCV is not installed. Run pip install -r ai-service/requirements.txt")
         if not rtsp_url:
@@ -105,6 +138,7 @@ class ProductCounter:
             self.duplicate_window_seconds = self._configured_float("AI_DUPLICATE_WINDOW_SECONDS", 20.0, 3.0, 90.0)
             self.duplicate_y_tolerance = int(self._configured_float("AI_DUPLICATE_Y_TOLERANCE", 45.0, 15.0, 140.0))
             self.recent_gate_counts = []
+            self._apply_filters(filters)
         self.thread = threading.Thread(target=self._run, args=(rtsp_url,), daemon=True)
         self.thread.start()
 
@@ -188,6 +222,9 @@ class ProductCounter:
             frames_since_tick += 1
 
             hot_mask, motion_mask = self._build_billet_mask(frame, subtractor)
+            roi_mask = self._build_counting_mask(width, height)
+            hot_mask = cv2.bitwise_and(hot_mask, roi_mask)
+            motion_mask = cv2.bitwise_and(motion_mask, roi_mask)
             contours, _ = cv2.findContours(hot_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             detections = self._detect_hot_billets(contours, width, height)
             scene_message = self._evaluate_scene_health(detections, hot_mask, motion_mask)
@@ -199,13 +236,16 @@ class ProductCounter:
                 self._update_tracks(detections, gate_x, gate_band_width)
 
             annotated = frame.copy()
+            self._draw_counting_zones(annotated, width, height)
             cv2.line(annotated, (gate_x, 0), (gate_x, height), (37, 99, 235), 2)
             cv2.rectangle(annotated, (max(0, gate_x - gate_band_width), 0), (min(width - 1, gate_x + gate_band_width), height), (37, 99, 235), 1)
             cv2.putText(annotated, "Count gate", (max(8, gate_x - 78), 24), cv2.FONT_HERSHEY_SIMPLEX, 0.58, (255, 237, 213), 2)
             for detection in detections:
                 x, y, w, h = detection.rect
-                cv2.rectangle(annotated, (x, y), (x + w, y + h), (20, 184, 166), 2)
-                cv2.putText(annotated, f"{detection.confidence}%", (x, max(18, y - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (209, 250, 229), 1)
+                box = np.array(detection.box, dtype=np.int32)
+                cv2.polylines(annotated, [box], True, (0, 0, 255), 2)
+                label = f"B{detection.track_id or '-'} {detection.confidence}%"
+                cv2.putText(annotated, label, (x, max(18, y - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (255, 255, 255), 2)
 
             with self.lock:
                 count = self.detected_count
@@ -259,16 +299,17 @@ class ProductCounter:
         _, motion_mask = cv2.threshold(motion_mask, 180, 255, cv2.THRESH_BINARY)
         hot_mask = cv2.bitwise_and(hot_mask, cv2.bitwise_or(motion_mask, hot_mask))
 
-        kernel = np.ones((7, 7), np.uint8)
+        open_kernel = np.ones((3, 3), np.uint8)
+        close_kernel = np.ones((5, 5), np.uint8)
         hot_mask = cv2.GaussianBlur(hot_mask, (5, 5), 0)
         _, hot_mask = cv2.threshold(hot_mask, 110, 255, cv2.THRESH_BINARY)
-        hot_mask = cv2.morphologyEx(hot_mask, cv2.MORPH_OPEN, kernel)
-        hot_mask = cv2.morphologyEx(hot_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+        hot_mask = cv2.morphologyEx(hot_mask, cv2.MORPH_OPEN, open_kernel, iterations=1)
+        hot_mask = cv2.morphologyEx(hot_mask, cv2.MORPH_CLOSE, close_kernel, iterations=1)
         return hot_mask, motion_mask
 
     def _detect_hot_billets(self, contours, width: int, height: int) -> List[Detection]:
         detections: List[Detection] = []
-        min_area = max(850, int(width * height * 0.0014))
+        min_area = max(280, int(self.min_box_width * self.min_box_height * 0.7))
         for contour in contours:
             area = cv2.contourArea(contour)
             if area < min_area:
@@ -279,18 +320,27 @@ class ProductCounter:
             short_side = max(1.0, min(box_width, box_height))
             long_side = max(box_width, box_height)
             elongation = long_side / short_side
-            if elongation < 2.8:
+            if elongation < self.min_aspect_ratio or elongation > self.max_aspect_ratio:
                 continue
 
             x, y, w, h = cv2.boundingRect(contour)
-            if w < 24 or h < 10:
+            if w < self.min_box_width or h < self.min_box_height:
+                continue
+            if w > self.max_box_width or h > self.max_box_height:
+                continue
+            center = (x + w // 2, y + h // 2)
+            if not self._point_allowed(center, width, height):
                 continue
 
             size_score = min(25, int(area / max(1, min_area) * 8))
-            shape_score = min(35, int((elongation - 2.8) * 10))
+            shape_score = min(35, int((elongation - self.min_aspect_ratio) * 10))
             brightness_score = 35
             confidence = max(1, min(99, 40 + size_score + shape_score + brightness_score))
-            detections.append(Detection(rect=(x, y, w, h), center=(x + w // 2, y + h // 2), confidence=confidence, elongation=elongation))
+            if confidence < self.confidence:
+                continue
+            box_points = cv2.boxPoints(rect)
+            box = tuple((int(point[0]), int(point[1])) for point in box_points)
+            detections.append(Detection(rect=(x, y, w, h), center=center, confidence=confidence, elongation=elongation, box=box))
         return detections
 
     def _evaluate_scene_health(self, detections: List[Detection], hot_mask, motion_mask) -> str:
@@ -333,7 +383,8 @@ class ProductCounter:
     def _update_tracks(self, detections: List[Detection], gate_x: int, gate_band_width: int) -> None:
         with self.lock:
             assigned_tracks = set()
-            ordered_detections = sorted(detections, key=lambda item: item.center[0], reverse=self.expected_direction < 0)
+            active_direction = self._active_direction_locked()
+            ordered_detections = sorted(detections, key=lambda item: item.center[0], reverse=active_direction < 0)
             for detection in ordered_detections:
                 center = detection.center
                 matched_id = None
@@ -350,6 +401,7 @@ class ProductCounter:
                         matched_id = track_id
 
                 if matched_id is None:
+                    detection.track_id = self.next_track_id
                     self.tracks[self.next_track_id] = Track(
                         rect=detection.rect,
                         center=center,
@@ -363,6 +415,7 @@ class ProductCounter:
                     continue
 
                 assigned_tracks.add(matched_id)
+                detection.track_id = matched_id
                 track = self.tracks[matched_id]
                 previous_rect = track.rect
                 previous_center = track.center
@@ -373,9 +426,10 @@ class ProductCounter:
                     track.last_moved_frame = self.frame_index
                     track.warning_sent = False
                     self.warnings = [warning for warning in self.warnings if warning.get("code") != "STALLED_BILLET"]
-                if self.expected_direction == 0 and abs(dx) > 8:
+                if self.movement_direction == "AUTO" and self.expected_direction == 0 and abs(dx) > 8:
                     self.expected_direction = 1 if dx > 0 else -1
 
+                active_direction = self._active_direction_locked()
                 track.previous_rect = previous_rect
                 track.previous_center = previous_center
                 track.rect = detection.rect
@@ -389,21 +443,13 @@ class ProductCounter:
                     track.warning_sent = True
                     self._push_warning_locked("STALLED_BILLET", "WARNING", "Billet has not moved for an extended period; review only if conveyor cooling flow has stopped.")
 
-                prev_front = previous_rect[0] + previous_rect[2]
-                curr_front = detection.rect[0] + detection.rect[2]
-                if self.expected_direction < 0:
-                    prev_front = previous_rect[0]
-                    curr_front = detection.rect[0]
-
-                if self.expected_direction >= 0:
-                    crossed_gate = prev_front < gate_x <= curr_front or previous_center[0] < gate_x <= center[0]
-                    crossed_reverse = previous_rect[0] >= gate_x > detection.rect[0]
-                else:
-                    crossed_gate = prev_front > gate_x >= curr_front or previous_center[0] > gate_x >= center[0]
-                    crossed_reverse = previous_rect[0] + previous_rect[2] <= gate_x < detection.rect[0] + detection.rect[2]
-
-                if crossed_reverse:
+                if active_direction == 0 or not self._trajectory_allowed(dx, dy, active_direction):
                     continue
+
+                if active_direction > 0:
+                    crossed_gate = previous_center[0] < gate_x <= center[0]
+                else:
+                    crossed_gate = previous_center[0] > gate_x >= center[0]
 
                 if not track.counted and frames_alive >= 2 and crossed_gate:
                     crossing_y = self._gate_crossing_y(previous_center, center, gate_x)
@@ -414,9 +460,24 @@ class ProductCounter:
                     self.last_count_frame = self.frame_index
                     self.recent_gate_counts.append((self.frame_index, crossing_y))
 
-            stale_ids = [track_id for track_id, track in self.tracks.items() if self.frame_index - track.last_seen > 30]
+            stale_ids = [track_id for track_id, track in self.tracks.items() if self.frame_index - track.last_seen > self.tracking_timeout_frames]
             for track_id in stale_ids:
                 self.tracks.pop(track_id, None)
+
+    def _active_direction_locked(self) -> int:
+        if self.movement_direction == "LEFT_TO_RIGHT":
+            return 1
+        if self.movement_direction == "RIGHT_TO_LEFT":
+            return -1
+        return self.expected_direction
+
+    @staticmethod
+    def _trajectory_allowed(dx: int, dy: int, direction: int) -> bool:
+        if direction == 0 or dx * direction <= 0:
+            return False
+        if abs(dx) < 1:
+            return False
+        return abs(dy) <= max(48, abs(dx) * 2.2)
 
     def _is_recent_duplicate_count(self, crossing_y: int) -> bool:
         effective_fps = max(8.0, self.fps or 0.0)
@@ -443,6 +504,102 @@ class ProductCounter:
         self.warnings = [warning for warning in self.warnings if warning.get("code") != code]
         self.warnings.append({"code": code, "severity": severity, "message": message})
         self.warnings = self.warnings[-4:]
+
+    def _apply_filters(self, filters: Optional[CountingFilters]) -> None:
+        self.min_box_width = self._filter_int(filters.minWidth if filters else None, 35, 10, 900)
+        self.max_box_width = self._filter_int(filters.maxWidth if filters else None, 620, self.min_box_width, 960)
+        self.min_box_height = self._filter_int(filters.minHeight if filters else None, 8, 4, 300)
+        self.max_box_height = self._filter_int(filters.maxHeight if filters else None, 140, self.min_box_height, 500)
+        self.min_aspect_ratio = self._filter_float(filters.minAspectRatio if filters else None, 3.0, 1.2, 40.0)
+        self.max_aspect_ratio = self._filter_float(filters.maxAspectRatio if filters else None, 28.0, self.min_aspect_ratio, 80.0)
+        self.gate_ratio = self._filter_float(filters.countGateRatio if filters else None, self.gate_ratio, 0.1, 0.9)
+        self.duplicate_window_seconds = self._filter_float(filters.duplicateWindowSeconds if filters else None, self.duplicate_window_seconds, 2.0, 120.0)
+        self.tracking_timeout_frames = self._filter_int(filters.trackingTimeoutFrames if filters else None, 45, 10, 240)
+        direction = (filters.movementDirection if filters else None) or "AUTO"
+        direction = direction.upper().replace(" ", "_").replace("-", "_")
+        self.movement_direction = direction if direction in {"AUTO", "LEFT_TO_RIGHT", "RIGHT_TO_LEFT"} else "AUTO"
+        self.conveyor_roi = self._sanitize_polygon(filters.conveyorRoi if filters else None) or self._default_conveyor_roi()
+        self.ignore_zones = [
+            polygon
+            for polygon in (self._sanitize_polygon(zone) for zone in (filters.ignoreZones if filters else []) or [])
+            if polygon
+        ] or self._default_ignore_zones()
+
+    @staticmethod
+    def _filter_int(value: Optional[int], default: int, minimum: int, maximum: int) -> int:
+        try:
+            parsed = int(value if value is not None else default)
+        except (TypeError, ValueError):
+            parsed = default
+        return max(minimum, min(maximum, parsed))
+
+    @staticmethod
+    def _filter_float(value: Optional[float], default: float, minimum: float, maximum: float) -> float:
+        try:
+            parsed = float(value if value is not None else default)
+        except (TypeError, ValueError):
+            parsed = default
+        return max(minimum, min(maximum, parsed))
+
+    @staticmethod
+    def _default_conveyor_roi() -> List[Tuple[float, float]]:
+        return [(0.04, 0.24), (0.78, 0.20), (0.97, 0.86), (0.06, 0.88)]
+
+    @staticmethod
+    def _default_ignore_zones() -> List[List[Tuple[float, float]]]:
+        return [
+            [(0.0, 0.0), (1.0, 0.0), (1.0, 0.18), (0.0, 0.18)],
+            [(0.84, 0.48), (1.0, 0.48), (1.0, 1.0), (0.84, 1.0)],
+        ]
+
+    @staticmethod
+    def _sanitize_polygon(points: Optional[List[PointRequest]]) -> List[Tuple[float, float]]:
+        if not points or len(points) < 3:
+            return []
+        polygon: List[Tuple[float, float]] = []
+        for point in points:
+            try:
+                x_value = max(0.0, min(1.0, float(point.x)))
+                y_value = max(0.0, min(1.0, float(point.y)))
+            except (TypeError, ValueError):
+                continue
+            polygon.append((x_value, y_value))
+        return polygon if len(polygon) >= 3 else []
+
+    def _build_counting_mask(self, width: int, height: int):
+        mask = np.zeros((height, width), dtype=np.uint8)
+        roi = self._polygon_to_pixels(self.conveyor_roi, width, height)
+        cv2.fillPoly(mask, [roi], 255)
+        for zone in self.ignore_zones:
+            cv2.fillPoly(mask, [self._polygon_to_pixels(zone, width, height)], 0)
+        return mask
+
+    def _point_allowed(self, center: Tuple[int, int], width: int, height: int) -> bool:
+        point = (float(center[0]), float(center[1]))
+        roi = self._polygon_to_pixels(self.conveyor_roi, width, height)
+        if cv2.pointPolygonTest(roi, point, False) < 0:
+            return False
+        for zone in self.ignore_zones:
+            if cv2.pointPolygonTest(self._polygon_to_pixels(zone, width, height), point, False) >= 0:
+                return False
+        return True
+
+    def _draw_counting_zones(self, frame, width: int, height: int) -> None:
+        roi = self._polygon_to_pixels(self.conveyor_roi, width, height)
+        cv2.polylines(frame, [roi], True, (255, 170, 0), 2)
+        for zone in self.ignore_zones:
+            points = self._polygon_to_pixels(zone, width, height)
+            overlay = frame.copy()
+            cv2.fillPoly(overlay, [points], (30, 41, 59))
+            cv2.addWeighted(overlay, 0.18, frame, 0.82, 0, frame)
+            cv2.polylines(frame, [points], True, (148, 163, 184), 1)
+
+    @staticmethod
+    def _polygon_to_pixels(points: List[Tuple[float, float]], width: int, height: int):
+        return np.array(
+            [[int(max(0.0, min(1.0, x_value)) * width), int(max(0.0, min(1.0, y_value)) * height)] for x_value, y_value in points],
+            dtype=np.int32,
+        )
 
     @staticmethod
     def _configured_float(name: str, default: float, minimum: float, maximum: float) -> float:
@@ -485,7 +642,7 @@ def health() -> dict:
 def start_counting(request: StartRequest) -> dict:
     rtsp_url = request.rtspUrl or os.environ.get("AI_RTSP_URL", "")
     try:
-        counter.start(rtsp_url, request.mode, request.productType, request.confidenceThreshold)
+        counter.start(rtsp_url, request.mode, request.productType, request.confidenceThreshold, request.filters)
     except RuntimeError as error:
         raise HTTPException(status_code=400, detail=str(error))
     return counter.status()

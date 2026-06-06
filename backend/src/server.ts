@@ -12,6 +12,8 @@ import { Driver, Party, Permission, Product, ProductEntry, Settings, SlipTemplat
 const PORT = Number(process.env.PORT || 4175);
 const HOST = process.env.HOST || "0.0.0.0";
 const app = express();
+const DEFAULT_AI_CONVEYOR_ROI = "0.04,0.24; 0.78,0.20; 0.97,0.86; 0.06,0.88";
+const DEFAULT_AI_IGNORE_ZONES = "0,0; 1,0; 1,0.18; 0,0.18\n0.84,0.48; 1,0.48; 1,1; 0.84,1";
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || `http://127.0.0.1:${PORT},http://localhost:${PORT}`)
   .split(",")
   .map((origin) => origin.trim())
@@ -160,6 +162,12 @@ function bool(value: unknown, fallback = false) {
   return fallback;
 }
 
+function boundedNumber(value: unknown, fallback: number, minimum: number, maximum: number) {
+  const parsed = Number(value ?? fallback);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(minimum, Math.min(maximum, parsed));
+}
+
 function cameraPosition(value: unknown): "FRONT" | "REAR" | "SIDE" {
   return value === "REAR" || value === "SIDE" ? value : "FRONT";
 }
@@ -181,11 +189,21 @@ function aiServiceUrl(value: string) {
   return /^https?:\/\//i.test(trimmed) ? trimmed : "";
 }
 
+function aiMovementDirection(value: unknown): Settings["aiProductCounting"]["movementDirection"] {
+  return value === "LEFT_TO_RIGHT" || value === "RIGHT_TO_LEFT" ? value : "AUTO";
+}
+
 function normalizeAiProductCounting(input: unknown, existing: Settings["aiProductCounting"], cameras: Settings["cameras"]) {
   const value = input && typeof input === "object" ? input as Record<string, unknown> : {};
   const confidenceThreshold = Math.max(1, Math.min(99, Number(value.confidenceThreshold ?? existing.confidenceThreshold ?? 70)));
   const cameraId = text(value.cameraId, existing.cameraId || cameras[0]?.id || "");
   const serviceUrl = aiServiceUrl(text(value.serviceUrl, existing.serviceUrl || ""));
+  const minBoxWidth = boundedNumber(value.minBoxWidth, existing.minBoxWidth ?? 35, 10, 900);
+  const maxBoxWidth = boundedNumber(value.maxBoxWidth, existing.maxBoxWidth ?? 620, minBoxWidth, 960);
+  const minBoxHeight = boundedNumber(value.minBoxHeight, existing.minBoxHeight ?? 8, 4, 300);
+  const maxBoxHeight = boundedNumber(value.maxBoxHeight, existing.maxBoxHeight ?? 140, minBoxHeight, 500);
+  const minAspectRatio = boundedNumber(value.minAspectRatio, existing.minAspectRatio ?? 3, 1.2, 40);
+  const maxAspectRatio = boundedNumber(value.maxAspectRatio, existing.maxAspectRatio ?? 28, minAspectRatio, 80);
   return {
     enabled: bool(value.enabled, existing.enabled),
     serviceUrl,
@@ -193,6 +211,18 @@ function normalizeAiProductCounting(input: unknown, existing: Settings["aiProduc
     countingMode: aiCountingMode(value.countingMode ?? existing.countingMode),
     productType: text(value.productType, existing.productType || "Bags / cartons / crates"),
     confidenceThreshold,
+    minBoxWidth,
+    maxBoxWidth,
+    minBoxHeight,
+    maxBoxHeight,
+    minAspectRatio,
+    maxAspectRatio,
+    countGateRatio: boundedNumber(value.countGateRatio, existing.countGateRatio ?? 0.62, 0.1, 0.9),
+    movementDirection: aiMovementDirection(value.movementDirection ?? existing.movementDirection),
+    trackingTimeoutFrames: boundedNumber(value.trackingTimeoutFrames, existing.trackingTimeoutFrames ?? 45, 10, 240),
+    duplicateWindowSeconds: boundedNumber(value.duplicateWindowSeconds, existing.duplicateWindowSeconds ?? 20, 2, 120),
+    conveyorRoi: text(value.conveyorRoi, existing.conveyorRoi || DEFAULT_AI_CONVEYOR_ROI),
+    ignoreZones: text(value.ignoreZones, existing.ignoreZones || DEFAULT_AI_IGNORE_ZONES),
     requireOperatorConfirmation: bool(value.requireOperatorConfirmation, existing.requireOperatorConfirmation),
     attachSnapshotToSlip: bool(value.attachSnapshotToSlip, existing.attachSnapshotToSlip)
   };
