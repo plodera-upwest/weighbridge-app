@@ -353,8 +353,10 @@ class ProductCounter:
                 dx = center[0] - previous_center[0]
                 dy = center[1] - previous_center[1]
                 distance = (dx * dx + dy * dy) ** 0.5
-                if distance > 8:
+                if distance > 1.5:
                     track.last_moved_frame = self.frame_index
+                    track.warning_sent = False
+                    self.warnings = [warning for warning in self.warnings if warning.get("code") != "STALLED_BILLET"]
                 if self.expected_direction == 0 and abs(dx) > 8:
                     self.expected_direction = 1 if dx > 0 else -1
 
@@ -364,10 +366,12 @@ class ProductCounter:
                 track.center = center
                 track.last_seen = self.frame_index
                 frames_alive = self.frame_index - track.first_seen
+                effective_fps = max(8.0, self.fps or 0.0)
+                stall_frame_limit = max(960, int(effective_fps * 120))
 
-                if not track.counted and frames_alive > 30 and self.frame_index - track.last_moved_frame > 150 and not track.warning_sent:
+                if not track.counted and frames_alive > 60 and self.frame_index - track.last_moved_frame > stall_frame_limit and not track.warning_sent:
                     track.warning_sent = True
-                    self._push_warning_locked("STALLED_BILLET", "CRITICAL", "Hot billet appears stalled near the conveyor count gate.")
+                    self._push_warning_locked("STALLED_BILLET", "WARNING", "Billet has not moved for an extended period; review only if conveyor cooling flow has stopped.")
 
                 prev_front = previous_rect[0] + previous_rect[2]
                 curr_front = detection.rect[0] + detection.rect[2]
