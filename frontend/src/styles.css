@@ -243,6 +243,61 @@
     color: #64748b;
   }
 
+  .ai-training-rules {
+    @apply grid gap-3 border p-3;
+    border-color: #bfdbfe;
+    border-radius: 14px;
+    background:
+      linear-gradient(135deg, rgba(217, 226, 255, 0.55), transparent 42%),
+      #f8fbff;
+  }
+
+  .ai-training-rules-head {
+    @apply flex items-start justify-between gap-3;
+  }
+
+  .ai-training-rules-head h4 {
+    @apply text-sm font-semibold;
+    color: #0f172a;
+  }
+
+  .ai-training-rules-head p {
+    @apply mt-0.5 text-xs font-medium normal-case;
+    color: #64748b;
+  }
+
+  .ai-training-rules-head span {
+    @apply shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold;
+    background: #dbeafe;
+    color: #1d4ed8;
+  }
+
+  .ai-training-rules-grid {
+    @apply grid grid-cols-3 gap-3;
+  }
+
+  .ai-training-rules-grid section {
+    @apply rounded-xl border bg-white p-3;
+    border-color: #dbeafe;
+  }
+
+  .ai-training-rules-grid strong {
+    @apply block text-xs font-semibold uppercase;
+    color: #334155;
+  }
+
+  .ai-training-rules-grid ul {
+    @apply mt-2 grid gap-1.5 pl-4 text-xs font-medium normal-case;
+    color: #475569;
+    list-style: disc;
+  }
+
+  @media (max-width: 1180px) {
+    .ai-training-rules-grid {
+      @apply grid-cols-1;
+    }
+  }
+
   .collapsible-setting-card {
     @apply border p-3;
     border-color: #e3e2e3;

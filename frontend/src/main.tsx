@@ -2762,6 +2762,38 @@ function Settings({ settings, disabled, onRefresh }: { settings: Settings; disab
                     <span className="text-xs font-medium text-slate-500">Use one polygon per line for walkways, crane paths, or upper lifting zones.</span>
                   </label>
                 </div>
+                <div className="ai-training-rules">
+                  <div className="ai-training-rules-head">
+                    <div>
+                      <h4>Training / Labeling Rules</h4>
+                      <p>Use these rules when preparing datasets from the production camera angle.</p>
+                    </div>
+                    <span>Billet standard</span>
+                  </div>
+                  <div className="ai-training-rules-grid">
+                    <section>
+                      <strong>Positive label</strong>
+                      <ul>
+                        <li>Label only billets physically on the conveyor belt as class: billet.</li>
+                        <li>Train with images from the exact camera angle used in production.</li>
+                      </ul>
+                    </section>
+                    <section>
+                      <strong>Do not label as billet</strong>
+                      <ul>
+                        <li>People, crane hooks, crane arms, machinery, rollers, shadows, glare, or hot reflections.</li>
+                        <li>Suspended or hoisted billets outside the conveyor zone.</li>
+                      </ul>
+                    </section>
+                    <section>
+                      <strong>Negative examples</strong>
+                      <ul>
+                        <li>People walking, crane movement, empty conveyor, suspended billets.</li>
+                        <li>Shadows, light glare, hot reflections, and normal background movement.</li>
+                      </ul>
+                    </section>
+                  </div>
+                </div>
                 {aiProductCounting.serviceUrl.trim().toLowerCase().startsWith("rtsp://") && (
                   <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900">
                     AI service URL must be an HTTP address for the local vision service. Put the RTSP stream below under Selected Counting Camera.
