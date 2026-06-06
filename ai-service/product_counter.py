@@ -26,9 +26,12 @@ class StartRequest(BaseModel):
 
 @dataclass
 class Track:
+    rect: Tuple[int, int, int, int]
     center: Tuple[int, int]
     last_seen: int
     first_seen: int
+    last_moved_frame: int
+    previous_rect: Tuple[int, int, int, int]
     previous_center: Tuple[int, int]
     counted: bool = False
     warning_sent: bool = False
@@ -65,6 +68,7 @@ class ProductCounter:
         self.last_count_frame = -9999
         self.low_confidence_frames = 0
         self.distorted_frames = 0
+        self.expected_direction = 0
 
     def start(self, rtsp_url: str, mode: str, product_type: str, confidence_threshold: int) -> None:
         if cv2 is None or np is None:
@@ -92,6 +96,7 @@ class ProductCounter:
             self.last_count_frame = -9999
             self.low_confidence_frames = 0
             self.distorted_frames = 0
+            self.expected_direction = 0
         self.thread = threading.Thread(target=self._run, args=(rtsp_url,), daemon=True)
         self.thread.start()
 
@@ -114,6 +119,7 @@ class ProductCounter:
             self.last_count_frame = -9999
             self.low_confidence_frames = 0
             self.distorted_frames = 0
+            self.expected_direction = 0
             self.message = "Counter reset"
 
     def confirm(self) -> None:
@@ -167,7 +173,7 @@ class ProductCounter:
 
             frame = self._resize(frame, 960)
             height, width = frame.shape[:2]
-            line_y = int(height * 0.52)
+            gate_x = int(width * 0.62)
             self.frame_index += 1
             frames_since_tick += 1
 
@@ -180,10 +186,11 @@ class ProductCounter:
                 with self.lock:
                     self.detected_count = len(detections)
             else:
-                self._update_tracks(detections, line_y)
+                self._update_tracks(detections, gate_x)
 
             annotated = frame.copy()
-            cv2.line(annotated, (0, line_y), (width, line_y), (37, 99, 235), 2)
+            cv2.line(annotated, (gate_x, 0), (gate_x, height), (37, 99, 235), 2)
+            cv2.putText(annotated, "Count gate", (max(8, gate_x - 78), 24), cv2.FONT_HERSHEY_SIMPLEX, 0.58, (255, 237, 213), 2)
             for detection in detections:
                 x, y, w, h = detection.rect
                 cv2.rectangle(annotated, (x, y), (x + w, y + h), (20, 184, 166), 2)
@@ -307,60 +314,83 @@ class ProductCounter:
         if self.low_confidence_frames >= 10:
             warnings.append({"code": "LOW_CONFIDENCE", "severity": "WARNING", "message": "Hot movement detected but billet shape was not confirmed."})
 
-        if len(detections) > 1:
-            detections_sorted = sorted(detections, key=lambda item: item.center[0])
-            for left, right in zip(detections_sorted, detections_sorted[1:]):
-                dx = abs(right.center[0] - left.center[0])
-                dy = abs(right.center[1] - left.center[1])
-                if dx < 150 and dy < 90:
-                    warnings.append({"code": "OVERLAP", "severity": "WARNING", "message": "Multiple hot billets are close together; count may need review."})
-                    break
-
         with self.lock:
             existing = [warning for warning in self.warnings if warning.get("code") in {"STALLED_BILLET", "WRONG_DIRECTION"}]
             self.warnings = (warnings + existing)[-4:]
         return scene_message
 
-    def _update_tracks(self, detections: List[Detection], line_y: int) -> None:
+    def _update_tracks(self, detections: List[Detection], gate_x: int) -> None:
         with self.lock:
             for detection in detections:
                 center = detection.center
                 matched_id = None
                 best_distance = 999999
+                max_track_distance = min(260, max(120, int(max(detection.rect[2], detection.rect[3]) * 0.45)))
                 for track_id, track in self.tracks.items():
                     dx = center[0] - track.center[0]
                     dy = center[1] - track.center[1]
                     distance = (dx * dx + dy * dy) ** 0.5
-                    if distance < best_distance and distance < 90:
+                    if distance < best_distance and distance < max_track_distance:
                         best_distance = distance
                         matched_id = track_id
 
                 if matched_id is None:
-                    self.tracks[self.next_track_id] = Track(center=center, last_seen=self.frame_index, first_seen=self.frame_index, previous_center=center)
+                    self.tracks[self.next_track_id] = Track(
+                        rect=detection.rect,
+                        center=center,
+                        last_seen=self.frame_index,
+                        first_seen=self.frame_index,
+                        last_moved_frame=self.frame_index,
+                        previous_rect=detection.rect,
+                        previous_center=center,
+                    )
                     self.next_track_id += 1
                     continue
 
                 track = self.tracks[matched_id]
-                previous_y = track.center[1]
+                previous_rect = track.rect
                 previous_center = track.center
+                dx = center[0] - previous_center[0]
+                dy = center[1] - previous_center[1]
+                distance = (dx * dx + dy * dy) ** 0.5
+                if distance > 8:
+                    track.last_moved_frame = self.frame_index
+                if self.expected_direction == 0 and abs(dx) > 8:
+                    self.expected_direction = 1 if dx > 0 else -1
+
+                track.previous_rect = previous_rect
                 track.previous_center = previous_center
+                track.rect = detection.rect
                 track.center = center
                 track.last_seen = self.frame_index
                 frames_alive = self.frame_index - track.first_seen
 
-                if not track.counted and frames_alive > 90 and not track.warning_sent:
+                if not track.counted and frames_alive > 30 and self.frame_index - track.last_moved_frame > 150 and not track.warning_sent:
                     track.warning_sent = True
-                    self._push_warning_locked("STALLED_BILLET", "CRITICAL", "Hot billet detected but not crossing the count line; possible stalled billet.")
+                    self._push_warning_locked("STALLED_BILLET", "CRITICAL", "Hot billet appears stalled near the conveyor count gate.")
 
-                if not track.counted and previous_y >= line_y > center[1]:
-                    self._push_warning_locked("WRONG_DIRECTION", "WARNING", "Billet moved opposite the expected count direction; not counted.")
+                prev_front = previous_rect[0] + previous_rect[2]
+                curr_front = detection.rect[0] + detection.rect[2]
+                if self.expected_direction < 0:
+                    prev_front = previous_rect[0]
+                    curr_front = detection.rect[0]
 
                 cooldown_clear = self.frame_index - self.last_count_frame > 18
-                if not track.counted and previous_y < line_y <= center[1] and cooldown_clear:
+                if self.expected_direction >= 0:
+                    crossed_gate = prev_front < gate_x <= curr_front or previous_center[0] < gate_x <= center[0]
+                    crossed_reverse = previous_rect[0] >= gate_x > detection.rect[0]
+                else:
+                    crossed_gate = prev_front > gate_x >= curr_front or previous_center[0] > gate_x >= center[0]
+                    crossed_reverse = previous_rect[0] + previous_rect[2] <= gate_x < detection.rect[0] + detection.rect[2]
+
+                if not track.counted and frames_alive >= 2 and crossed_reverse and self.detected_count > 0:
+                    self._push_warning_locked("WRONG_DIRECTION", "WARNING", "Billet moved opposite the learned count direction; not counted.")
+
+                if not track.counted and frames_alive >= 2 and crossed_gate and cooldown_clear:
                     track.counted = True
                     self.detected_count += 1
                     self.last_count_frame = self.frame_index
-                elif not track.counted and previous_y < line_y <= center[1] and not cooldown_clear:
+                elif not track.counted and frames_alive >= 2 and crossed_gate and not cooldown_clear:
                     self._push_warning_locked("COOLDOWN", "INFO", "Possible duplicate billet ignored during count cooldown.")
 
             stale_ids = [track_id for track_id, track in self.tracks.items() if self.frame_index - track.last_seen > 30]
