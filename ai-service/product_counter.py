@@ -69,6 +69,11 @@ class ProductCounter:
         self.low_confidence_frames = 0
         self.distorted_frames = 0
         self.expected_direction = 0
+        self.gate_ratio = self._configured_float("AI_COUNT_GATE_RATIO", 0.62, 0.25, 0.9)
+        self.gate_lock_seconds = self._configured_float("AI_GATE_LOCK_SECONDS", 18.0, 3.0, 90.0)
+        self.gate_locked = False
+        self.gate_clear_frames = 0
+        self.count_lock_until_frame = -9999
 
     def start(self, rtsp_url: str, mode: str, product_type: str, confidence_threshold: int) -> None:
         if cv2 is None or np is None:
@@ -97,6 +102,11 @@ class ProductCounter:
             self.low_confidence_frames = 0
             self.distorted_frames = 0
             self.expected_direction = 0
+            self.gate_ratio = self._configured_float("AI_COUNT_GATE_RATIO", 0.62, 0.25, 0.9)
+            self.gate_lock_seconds = self._configured_float("AI_GATE_LOCK_SECONDS", 18.0, 3.0, 90.0)
+            self.gate_locked = False
+            self.gate_clear_frames = 0
+            self.count_lock_until_frame = -9999
         self.thread = threading.Thread(target=self._run, args=(rtsp_url,), daemon=True)
         self.thread.start()
 
@@ -120,6 +130,9 @@ class ProductCounter:
             self.low_confidence_frames = 0
             self.distorted_frames = 0
             self.expected_direction = 0
+            self.gate_locked = False
+            self.gate_clear_frames = 0
+            self.count_lock_until_frame = -9999
             self.message = "Counter reset"
 
     def confirm(self) -> None:
@@ -173,7 +186,8 @@ class ProductCounter:
 
             frame = self._resize(frame, 960)
             height, width = frame.shape[:2]
-            gate_x = int(width * 0.62)
+            gate_x = int(width * self.gate_ratio)
+            gate_band_width = max(18, int(width * 0.035))
             self.frame_index += 1
             frames_since_tick += 1
 
@@ -186,10 +200,11 @@ class ProductCounter:
                 with self.lock:
                     self.detected_count = len(detections)
             else:
-                self._update_tracks(detections, gate_x)
+                self._update_tracks(detections, gate_x, gate_band_width)
 
             annotated = frame.copy()
             cv2.line(annotated, (gate_x, 0), (gate_x, height), (37, 99, 235), 2)
+            cv2.rectangle(annotated, (max(0, gate_x - gate_band_width), 0), (min(width - 1, gate_x + gate_band_width), height), (37, 99, 235), 1)
             cv2.putText(annotated, "Count gate", (max(8, gate_x - 78), 24), cv2.FONT_HERSHEY_SIMPLEX, 0.58, (255, 237, 213), 2)
             for detection in detections:
                 x, y, w, h = detection.rect
@@ -319,8 +334,16 @@ class ProductCounter:
             self.warnings = (warnings + existing)[-4:]
         return scene_message
 
-    def _update_tracks(self, detections: List[Detection], gate_x: int) -> None:
+    def _update_tracks(self, detections: List[Detection], gate_x: int, gate_band_width: int) -> None:
         with self.lock:
+            gate_busy = self._gate_has_billet(detections, gate_x, gate_band_width)
+            if gate_busy:
+                self.gate_clear_frames = 0
+            else:
+                self.gate_clear_frames += 1
+                if self.gate_clear_frames >= 12 and self.frame_index >= self.count_lock_until_frame:
+                    self.gate_locked = False
+
             for detection in detections:
                 center = detection.center
                 matched_id = None
@@ -379,7 +402,10 @@ class ProductCounter:
                     prev_front = previous_rect[0]
                     curr_front = detection.rect[0]
 
+                effective_fps = max(8.0, self.fps or 0.0)
+                gate_lock_frames = max(24, int(effective_fps * self.gate_lock_seconds))
                 cooldown_clear = self.frame_index - self.last_count_frame > 18
+                gate_ready = not self.gate_locked and self.frame_index >= self.count_lock_until_frame
                 if self.expected_direction >= 0:
                     crossed_gate = prev_front < gate_x <= curr_front or previous_center[0] < gate_x <= center[0]
                     crossed_reverse = previous_rect[0] >= gate_x > detection.rect[0]
@@ -390,21 +416,40 @@ class ProductCounter:
                 if not track.counted and frames_alive >= 2 and crossed_reverse and self.detected_count > 0:
                     self._push_warning_locked("WRONG_DIRECTION", "WARNING", "Billet moved opposite the learned count direction; not counted.")
 
-                if not track.counted and frames_alive >= 2 and crossed_gate and cooldown_clear:
+                if not track.counted and frames_alive >= 2 and crossed_gate and cooldown_clear and gate_ready:
                     track.counted = True
                     self.detected_count += 1
                     self.last_count_frame = self.frame_index
-                elif not track.counted and frames_alive >= 2 and crossed_gate and not cooldown_clear:
-                    self._push_warning_locked("COOLDOWN", "INFO", "Possible duplicate billet ignored during count cooldown.")
+                    self.gate_locked = True
+                    self.gate_clear_frames = 0
+                    self.count_lock_until_frame = self.frame_index + gate_lock_frames
 
             stale_ids = [track_id for track_id, track in self.tracks.items() if self.frame_index - track.last_seen > 30]
             for track_id in stale_ids:
                 self.tracks.pop(track_id, None)
 
+    @staticmethod
+    def _gate_has_billet(detections: List[Detection], gate_x: int, gate_band_width: int) -> bool:
+        gate_left = gate_x - gate_band_width
+        gate_right = gate_x + gate_band_width
+        for detection in detections:
+            x, _y, w, _h = detection.rect
+            if x <= gate_right and x + w >= gate_left:
+                return True
+        return False
+
     def _push_warning_locked(self, code: str, severity: str, message: str) -> None:
         self.warnings = [warning for warning in self.warnings if warning.get("code") != code]
         self.warnings.append({"code": code, "severity": severity, "message": message})
         self.warnings = self.warnings[-4:]
+
+    @staticmethod
+    def _configured_float(name: str, default: float, minimum: float, maximum: float) -> float:
+        try:
+            value = float(os.environ.get(name, default))
+        except (TypeError, ValueError):
+            value = default
+        return max(minimum, min(maximum, value))
 
     @staticmethod
     def _resize(frame, max_width: int):

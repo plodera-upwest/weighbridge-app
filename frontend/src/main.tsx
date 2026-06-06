@@ -1878,7 +1878,7 @@ function AiProductCountingPanel({
       </div>
       <div className={warnings.length ? "ai-counting-checks has-warnings" : "ai-counting-checks"}>
         <div className="ai-counting-checks-head">
-          <span>Checks & balances</span>
+          <span>Notification</span>
           <strong>{warnings.length ? `${warnings.length} warning${warnings.length === 1 ? "" : "s"}` : "Clear"}</strong>
         </div>
         {warnings.length ? (
