@@ -70,10 +70,9 @@ class ProductCounter:
         self.distorted_frames = 0
         self.expected_direction = 0
         self.gate_ratio = self._configured_float("AI_COUNT_GATE_RATIO", 0.62, 0.25, 0.9)
-        self.gate_lock_seconds = self._configured_float("AI_GATE_LOCK_SECONDS", 18.0, 3.0, 90.0)
-        self.gate_locked = False
-        self.gate_clear_frames = 0
-        self.count_lock_until_frame = -9999
+        self.duplicate_window_seconds = self._configured_float("AI_DUPLICATE_WINDOW_SECONDS", 20.0, 3.0, 90.0)
+        self.duplicate_y_tolerance = int(self._configured_float("AI_DUPLICATE_Y_TOLERANCE", 45.0, 15.0, 140.0))
+        self.recent_gate_counts: List[Tuple[int, int]] = []
 
     def start(self, rtsp_url: str, mode: str, product_type: str, confidence_threshold: int) -> None:
         if cv2 is None or np is None:
@@ -103,10 +102,9 @@ class ProductCounter:
             self.distorted_frames = 0
             self.expected_direction = 0
             self.gate_ratio = self._configured_float("AI_COUNT_GATE_RATIO", 0.62, 0.25, 0.9)
-            self.gate_lock_seconds = self._configured_float("AI_GATE_LOCK_SECONDS", 18.0, 3.0, 90.0)
-            self.gate_locked = False
-            self.gate_clear_frames = 0
-            self.count_lock_until_frame = -9999
+            self.duplicate_window_seconds = self._configured_float("AI_DUPLICATE_WINDOW_SECONDS", 20.0, 3.0, 90.0)
+            self.duplicate_y_tolerance = int(self._configured_float("AI_DUPLICATE_Y_TOLERANCE", 45.0, 15.0, 140.0))
+            self.recent_gate_counts = []
         self.thread = threading.Thread(target=self._run, args=(rtsp_url,), daemon=True)
         self.thread.start()
 
@@ -130,9 +128,7 @@ class ProductCounter:
             self.low_confidence_frames = 0
             self.distorted_frames = 0
             self.expected_direction = 0
-            self.gate_locked = False
-            self.gate_clear_frames = 0
-            self.count_lock_until_frame = -9999
+            self.recent_gate_counts = []
             self.message = "Counter reset"
 
     def confirm(self) -> None:
@@ -330,26 +326,22 @@ class ProductCounter:
             warnings.append({"code": "LOW_CONFIDENCE", "severity": "WARNING", "message": "Hot movement detected but billet shape was not confirmed."})
 
         with self.lock:
-            existing = [warning for warning in self.warnings if warning.get("code") in {"STALLED_BILLET", "WRONG_DIRECTION"}]
+            existing = [warning for warning in self.warnings if warning.get("code") in {"STALLED_BILLET"}]
             self.warnings = (warnings + existing)[-4:]
         return scene_message
 
     def _update_tracks(self, detections: List[Detection], gate_x: int, gate_band_width: int) -> None:
         with self.lock:
-            gate_busy = self._gate_has_billet(detections, gate_x, gate_band_width)
-            if gate_busy:
-                self.gate_clear_frames = 0
-            else:
-                self.gate_clear_frames += 1
-                if self.gate_clear_frames >= 12 and self.frame_index >= self.count_lock_until_frame:
-                    self.gate_locked = False
-
-            for detection in detections:
+            assigned_tracks = set()
+            ordered_detections = sorted(detections, key=lambda item: item.center[0], reverse=self.expected_direction < 0)
+            for detection in ordered_detections:
                 center = detection.center
                 matched_id = None
                 best_distance = 999999
                 max_track_distance = min(260, max(120, int(max(detection.rect[2], detection.rect[3]) * 0.45)))
                 for track_id, track in self.tracks.items():
+                    if track_id in assigned_tracks:
+                        continue
                     dx = center[0] - track.center[0]
                     dy = center[1] - track.center[1]
                     distance = (dx * dx + dy * dy) ** 0.5
@@ -370,6 +362,7 @@ class ProductCounter:
                     self.next_track_id += 1
                     continue
 
+                assigned_tracks.add(matched_id)
                 track = self.tracks[matched_id]
                 previous_rect = track.rect
                 previous_center = track.center
@@ -402,10 +395,6 @@ class ProductCounter:
                     prev_front = previous_rect[0]
                     curr_front = detection.rect[0]
 
-                effective_fps = max(8.0, self.fps or 0.0)
-                gate_lock_frames = max(24, int(effective_fps * self.gate_lock_seconds))
-                cooldown_clear = self.frame_index - self.last_count_frame > 18
-                gate_ready = not self.gate_locked and self.frame_index >= self.count_lock_until_frame
                 if self.expected_direction >= 0:
                     crossed_gate = prev_front < gate_x <= curr_front or previous_center[0] < gate_x <= center[0]
                     crossed_reverse = previous_rect[0] >= gate_x > detection.rect[0]
@@ -413,30 +402,42 @@ class ProductCounter:
                     crossed_gate = prev_front > gate_x >= curr_front or previous_center[0] > gate_x >= center[0]
                     crossed_reverse = previous_rect[0] + previous_rect[2] <= gate_x < detection.rect[0] + detection.rect[2]
 
-                if not track.counted and frames_alive >= 2 and crossed_reverse and self.detected_count > 0:
-                    self._push_warning_locked("WRONG_DIRECTION", "WARNING", "Billet moved opposite the learned count direction; not counted.")
+                if crossed_reverse:
+                    continue
 
-                if not track.counted and frames_alive >= 2 and crossed_gate and cooldown_clear and gate_ready:
+                if not track.counted and frames_alive >= 2 and crossed_gate:
+                    crossing_y = self._gate_crossing_y(previous_center, center, gate_x)
+                    if self._is_recent_duplicate_count(crossing_y):
+                        continue
                     track.counted = True
                     self.detected_count += 1
                     self.last_count_frame = self.frame_index
-                    self.gate_locked = True
-                    self.gate_clear_frames = 0
-                    self.count_lock_until_frame = self.frame_index + gate_lock_frames
+                    self.recent_gate_counts.append((self.frame_index, crossing_y))
 
             stale_ids = [track_id for track_id, track in self.tracks.items() if self.frame_index - track.last_seen > 30]
             for track_id in stale_ids:
                 self.tracks.pop(track_id, None)
 
+    def _is_recent_duplicate_count(self, crossing_y: int) -> bool:
+        effective_fps = max(8.0, self.fps or 0.0)
+        window_frames = max(24, int(effective_fps * self.duplicate_window_seconds))
+        self.recent_gate_counts = [
+            (frame, y_value)
+            for frame, y_value in self.recent_gate_counts
+            if self.frame_index - frame <= window_frames
+        ]
+        return any(abs(y_value - crossing_y) <= self.duplicate_y_tolerance for _frame, y_value in self.recent_gate_counts)
+
     @staticmethod
-    def _gate_has_billet(detections: List[Detection], gate_x: int, gate_band_width: int) -> bool:
-        gate_left = gate_x - gate_band_width
-        gate_right = gate_x + gate_band_width
-        for detection in detections:
-            x, _y, w, _h = detection.rect
-            if x <= gate_right and x + w >= gate_left:
-                return True
-        return False
+    def _gate_crossing_y(previous_center: Tuple[int, int], center: Tuple[int, int], gate_x: int) -> int:
+        previous_x, previous_y = previous_center
+        current_x, current_y = center
+        delta_x = current_x - previous_x
+        if abs(delta_x) > 1:
+            ratio = (gate_x - previous_x) / delta_x
+            if 0 <= ratio <= 1:
+                return int(previous_y + ratio * (current_y - previous_y))
+        return current_y
 
     def _push_warning_locked(self, code: str, severity: str, message: str) -> None:
         self.warnings = [warning for warning in self.warnings if warning.get("code") != code]
