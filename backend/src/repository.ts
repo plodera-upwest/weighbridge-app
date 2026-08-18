@@ -6,8 +6,10 @@ import { AuditLog, Db, Role, Settings, SlipTemplate } from "./types";
 
 const DATA_DIR = path.join(process.cwd(), "data");
 const DB_PATH = path.join(DATA_DIR, "runtime-db.json");
-const DEFAULT_AI_CONVEYOR_ROI = "0.04,0.24; 0.78,0.20; 0.97,0.86; 0.06,0.88";
-const DEFAULT_AI_IGNORE_ZONES = "0,0; 1,0; 1,0.18; 0,0.18\n0.84,0.48; 1,0.48; 1,1; 0.84,1";
+const DEFAULT_AI_CONVEYOR_ROI = "";
+const DEFAULT_AI_IGNORE_ZONES = "";
+const LEGACY_SAMPLE_AI_CONVEYOR_ROI = "0.10,0.27; 0.42,0.05; 0.98,0.31; 0.74,0.98; 0.12,0.96; 0.36,0.67";
+const LEGACY_SAMPLE_AI_IGNORE_ZONES = "0,0; 1,0; 1,0.18; 0,0.18\n0.84,0.48; 1,0.48; 1,1; 0.84,1";
 
 function isHttpUrl(value: string) {
   return /^https?:\/\//i.test(value.trim());
@@ -33,6 +35,19 @@ function repairAiServiceUrl(db: Db, aiCounting: Settings["aiProductCounting"]) {
   }
   aiCounting.serviceUrl = "";
   return true;
+}
+
+function clearLegacyAiZones(target: { conveyorRoi?: string; ignoreZones?: string }) {
+  let changed = false;
+  if (target.conveyorRoi === LEGACY_SAMPLE_AI_CONVEYOR_ROI) {
+    target.conveyorRoi = "";
+    changed = true;
+  }
+  if (target.ignoreZones === LEGACY_SAMPLE_AI_IGNORE_ZONES) {
+    target.ignoreZones = "";
+    changed = true;
+  }
+  return changed;
 }
 
 export function uid(prefix: string) {
@@ -131,7 +146,9 @@ const settings: Settings = {
     conveyorRoi: DEFAULT_AI_CONVEYOR_ROI,
     ignoreZones: DEFAULT_AI_IGNORE_ZONES,
     requireOperatorConfirmation: true,
-    attachSnapshotToSlip: true
+    attachSnapshotToSlip: true,
+    activeProfileId: "",
+    profiles: []
   },
   device: {
     connectionType: "simulator",
@@ -270,7 +287,9 @@ export function readDb(): Db {
       conveyorRoi: DEFAULT_AI_CONVEYOR_ROI,
       ignoreZones: DEFAULT_AI_IGNORE_ZONES,
       requireOperatorConfirmation: true,
-      attachSnapshotToSlip: true
+      attachSnapshotToSlip: true,
+      activeProfileId: "",
+      profiles: []
     };
     changed = true;
   } else {
@@ -346,6 +365,9 @@ export function readDb(): Db {
       migratedAiCounting.ignoreZones = DEFAULT_AI_IGNORE_ZONES;
       changed = true;
     }
+    if (clearLegacyAiZones(migratedAiCounting)) {
+      changed = true;
+    }
     if (typeof migratedAiCounting.requireOperatorConfirmation !== "boolean") {
       migratedAiCounting.requireOperatorConfirmation = true;
       changed = true;
@@ -353,6 +375,28 @@ export function readDb(): Db {
     if (typeof migratedAiCounting.attachSnapshotToSlip !== "boolean") {
       migratedAiCounting.attachSnapshotToSlip = true;
       changed = true;
+    }
+    if (typeof migratedAiCounting.activeProfileId !== "string") {
+      migratedAiCounting.activeProfileId = "";
+      changed = true;
+    }
+    if (!Array.isArray(migratedAiCounting.profiles)) {
+      migratedAiCounting.profiles = [];
+      changed = true;
+    } else {
+      migratedAiCounting.profiles.forEach((profile) => {
+        if (typeof profile.conveyorRoi !== "string") {
+          profile.conveyorRoi = "";
+          changed = true;
+        }
+        if (typeof profile.ignoreZones !== "string") {
+          profile.ignoreZones = "";
+          changed = true;
+        }
+        if (clearLegacyAiZones(profile)) {
+          changed = true;
+        }
+      });
     }
     if (repairAiServiceUrl(db, migratedAiCounting)) {
       changed = true;

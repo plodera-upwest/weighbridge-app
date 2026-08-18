@@ -12,8 +12,8 @@ import { Driver, Party, Permission, Product, ProductEntry, Settings, SlipTemplat
 const PORT = Number(process.env.PORT || 4175);
 const HOST = process.env.HOST || "0.0.0.0";
 const app = express();
-const DEFAULT_AI_CONVEYOR_ROI = "0.04,0.24; 0.78,0.20; 0.97,0.86; 0.06,0.88";
-const DEFAULT_AI_IGNORE_ZONES = "0,0; 1,0; 1,0.18; 0,0.18\n0.84,0.48; 1,0.48; 1,1; 0.84,1";
+const DEFAULT_AI_CONVEYOR_ROI = "";
+const DEFAULT_AI_IGNORE_ZONES = "";
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || `http://127.0.0.1:${PORT},http://localhost:${PORT}`)
   .split(",")
   .map((origin) => origin.trim())
@@ -193,6 +193,79 @@ function aiMovementDirection(value: unknown): Settings["aiProductCounting"]["mov
   return value === "LEFT_TO_RIGHT" || value === "RIGHT_TO_LEFT" ? value : "AUTO";
 }
 
+function aiProductKind(value: unknown): Settings["aiProductCounting"]["profiles"][number]["productKind"] {
+  return value === "BILLET" ||
+    value === "LONG_METAL" ||
+    value === "ROUND_TUBE" ||
+    value === "SQUARE_TUBE" ||
+    value === "PLASTIC_TUBE" ||
+    value === "BAG_CARTON" ||
+    value === "LIVESTOCK" ||
+    value === "CUSTOM"
+    ? value
+    : "CUSTOM";
+}
+
+function normalizeAiCountingProfile(
+  input: unknown,
+  existing: Settings["aiProductCounting"]["profiles"][number] | undefined,
+  base: Omit<Settings["aiProductCounting"], "activeProfileId" | "profiles">,
+  cameras: Settings["cameras"],
+  index: number
+): Settings["aiProductCounting"]["profiles"][number] {
+  const value = input && typeof input === "object" ? input as Record<string, unknown> : {};
+  const fallbackCameraId = base.cameraId || cameras[0]?.id || "";
+  const productName = text(value.productName, existing?.productName || "");
+  const productType = text(value.productType, existing?.productType || productName || base.productType || "Product");
+  const minBoxWidth = boundedNumber(value.minBoxWidth, existing?.minBoxWidth ?? base.minBoxWidth, 10, 900);
+  const maxBoxWidth = boundedNumber(value.maxBoxWidth, existing?.maxBoxWidth ?? base.maxBoxWidth, minBoxWidth, 960);
+  const minBoxHeight = boundedNumber(value.minBoxHeight, existing?.minBoxHeight ?? base.minBoxHeight, 4, 300);
+  const maxBoxHeight = boundedNumber(value.maxBoxHeight, existing?.maxBoxHeight ?? base.maxBoxHeight, minBoxHeight, 500);
+  const minAspectRatio = boundedNumber(value.minAspectRatio, existing?.minAspectRatio ?? base.minAspectRatio, 1.2, 40);
+  const maxAspectRatio = boundedNumber(value.maxAspectRatio, existing?.maxAspectRatio ?? base.maxAspectRatio, minAspectRatio, 80);
+
+  return {
+    id: text(value.id, existing?.id || uid("ai-profile")),
+    name: text(value.name, existing?.name || (productName ? `${productName} counting` : `Counting profile ${index + 1}`)),
+    enabled: bool(value.enabled, existing?.enabled ?? true),
+    productId: text(value.productId, existing?.productId || ""),
+    productName,
+    productKind: aiProductKind(value.productKind ?? existing?.productKind),
+    cameraId: text(value.cameraId, existing?.cameraId || fallbackCameraId),
+    countingMode: aiCountingMode(value.countingMode ?? existing?.countingMode ?? base.countingMode),
+    productType,
+    confidenceThreshold: boundedNumber(value.confidenceThreshold, existing?.confidenceThreshold ?? base.confidenceThreshold, 1, 99),
+    minBoxWidth,
+    maxBoxWidth,
+    minBoxHeight,
+    maxBoxHeight,
+    minAspectRatio,
+    maxAspectRatio,
+    countGateRatio: boundedNumber(value.countGateRatio, existing?.countGateRatio ?? base.countGateRatio, 0.1, 0.9),
+    movementDirection: aiMovementDirection(value.movementDirection ?? existing?.movementDirection ?? base.movementDirection),
+    trackingTimeoutFrames: boundedNumber(value.trackingTimeoutFrames, existing?.trackingTimeoutFrames ?? base.trackingTimeoutFrames, 10, 240),
+    duplicateWindowSeconds: boundedNumber(value.duplicateWindowSeconds, existing?.duplicateWindowSeconds ?? base.duplicateWindowSeconds, 2, 120),
+    conveyorRoi: text(value.conveyorRoi, existing?.conveyorRoi || base.conveyorRoi || DEFAULT_AI_CONVEYOR_ROI),
+    ignoreZones: text(value.ignoreZones, existing?.ignoreZones || base.ignoreZones || DEFAULT_AI_IGNORE_ZONES),
+    requireOperatorConfirmation: bool(value.requireOperatorConfirmation, existing?.requireOperatorConfirmation ?? base.requireOperatorConfirmation),
+    attachSnapshotToSlip: bool(value.attachSnapshotToSlip, existing?.attachSnapshotToSlip ?? base.attachSnapshotToSlip)
+  };
+}
+
+function normalizeAiCountingProfiles(
+  input: unknown,
+  existing: Settings["aiProductCounting"]["profiles"] | undefined,
+  base: Omit<Settings["aiProductCounting"], "activeProfileId" | "profiles">,
+  cameras: Settings["cameras"]
+) {
+  const source = Array.isArray(input) ? input : Array.isArray(existing) ? existing : [];
+  const existingById = new Map((existing || []).map((profile) => [profile.id, profile]));
+  return source.map((item, index) => {
+    const itemId = item && typeof item === "object" ? text((item as Record<string, unknown>).id) : "";
+    return normalizeAiCountingProfile(item, existingById.get(itemId), base, cameras, index);
+  });
+}
+
 function normalizeAiProductCounting(input: unknown, existing: Settings["aiProductCounting"], cameras: Settings["cameras"]) {
   const value = input && typeof input === "object" ? input as Record<string, unknown> : {};
   const confidenceThreshold = Math.max(1, Math.min(99, Number(value.confidenceThreshold ?? existing.confidenceThreshold ?? 70)));
@@ -204,7 +277,7 @@ function normalizeAiProductCounting(input: unknown, existing: Settings["aiProduc
   const maxBoxHeight = boundedNumber(value.maxBoxHeight, existing.maxBoxHeight ?? 140, minBoxHeight, 500);
   const minAspectRatio = boundedNumber(value.minAspectRatio, existing.minAspectRatio ?? 3, 1.2, 40);
   const maxAspectRatio = boundedNumber(value.maxAspectRatio, existing.maxAspectRatio ?? 28, minAspectRatio, 80);
-  return {
+  const base = {
     enabled: bool(value.enabled, existing.enabled),
     serviceUrl,
     cameraId,
@@ -225,6 +298,13 @@ function normalizeAiProductCounting(input: unknown, existing: Settings["aiProduc
     ignoreZones: text(value.ignoreZones, existing.ignoreZones || DEFAULT_AI_IGNORE_ZONES),
     requireOperatorConfirmation: bool(value.requireOperatorConfirmation, existing.requireOperatorConfirmation),
     attachSnapshotToSlip: bool(value.attachSnapshotToSlip, existing.attachSnapshotToSlip)
+  };
+  const profiles = normalizeAiCountingProfiles(value.profiles, existing.profiles, base, cameras);
+  const activeProfileId = text(value.activeProfileId, existing.activeProfileId || "");
+  return {
+    ...base,
+    activeProfileId: profiles.some((profile) => profile.id === activeProfileId) ? activeProfileId : "",
+    profiles
   };
 }
 

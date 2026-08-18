@@ -34,6 +34,37 @@ export type Driver = { id: string; name: string; phone: string };
 export type Party = { id: string; name: string; type: "CUSTOMER" | "SUPPLIER"; phone: string };
 export type Product = { id: string; name: string; unit: string };
 
+export type AiCountingMode = "LINE_CROSSING" | "ZONE_OCCUPANCY" | "MANUAL_REVIEW";
+export type AiMovementDirection = "AUTO" | "LEFT_TO_RIGHT" | "RIGHT_TO_LEFT";
+export type AiProductKind = "BILLET" | "LONG_METAL" | "ROUND_TUBE" | "SQUARE_TUBE" | "PLASTIC_TUBE" | "BAG_CARTON" | "LIVESTOCK" | "CUSTOM";
+
+export type AiCountingProfile = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  productId: string;
+  productName: string;
+  productKind: AiProductKind;
+  cameraId: string;
+  countingMode: AiCountingMode;
+  productType: string;
+  confidenceThreshold: number;
+  minBoxWidth: number;
+  maxBoxWidth: number;
+  minBoxHeight: number;
+  maxBoxHeight: number;
+  minAspectRatio: number;
+  maxAspectRatio: number;
+  countGateRatio: number;
+  movementDirection: AiMovementDirection;
+  trackingTimeoutFrames: number;
+  duplicateWindowSeconds: number;
+  conveyorRoi: string;
+  ignoreZones: string;
+  requireOperatorConfirmation: boolean;
+  attachSnapshotToSlip: boolean;
+};
+
 export type ProductEntry = {
   id: string;
   productId: string;
@@ -123,7 +154,7 @@ export type Settings = {
     enabled: boolean;
     serviceUrl: string;
     cameraId: string;
-    countingMode: "LINE_CROSSING" | "ZONE_OCCUPANCY" | "MANUAL_REVIEW";
+    countingMode: AiCountingMode;
     productType: string;
     confidenceThreshold: number;
     minBoxWidth: number;
@@ -133,13 +164,15 @@ export type Settings = {
     minAspectRatio: number;
     maxAspectRatio: number;
     countGateRatio: number;
-    movementDirection: "AUTO" | "LEFT_TO_RIGHT" | "RIGHT_TO_LEFT";
+    movementDirection: AiMovementDirection;
     trackingTimeoutFrames: number;
     duplicateWindowSeconds: number;
     conveyorRoi: string;
     ignoreZones: string;
     requireOperatorConfirmation: boolean;
     attachSnapshotToSlip: boolean;
+    activeProfileId: string;
+    profiles: AiCountingProfile[];
   };
   device: {
     connectionType: "serial" | "tcp" | "simulator";

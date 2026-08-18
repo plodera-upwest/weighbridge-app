@@ -59,11 +59,40 @@ type CameraSetting = {
   active: boolean;
 };
 type CameraImage = { id: string; cameraId: string; cameraName: string; weighmentType: "FIRST" | "FINAL"; position: CameraPosition; imageUrl: string; capturedAt: string };
+type AiCountingMode = "LINE_CROSSING" | "ZONE_OCCUPANCY" | "MANUAL_REVIEW";
+type AiMovementDirection = "AUTO" | "LEFT_TO_RIGHT" | "RIGHT_TO_LEFT";
+type AiProductKind = "BILLET" | "LONG_METAL" | "ROUND_TUBE" | "SQUARE_TUBE" | "PLASTIC_TUBE" | "BAG_CARTON" | "LIVESTOCK" | "CUSTOM";
+type AiCountingProfile = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  productId: string;
+  productName: string;
+  productKind: AiProductKind;
+  cameraId: string;
+  countingMode: AiCountingMode;
+  productType: string;
+  confidenceThreshold: number;
+  minBoxWidth: number;
+  maxBoxWidth: number;
+  minBoxHeight: number;
+  maxBoxHeight: number;
+  minAspectRatio: number;
+  maxAspectRatio: number;
+  countGateRatio: number;
+  movementDirection: AiMovementDirection;
+  trackingTimeoutFrames: number;
+  duplicateWindowSeconds: number;
+  conveyorRoi: string;
+  ignoreZones: string;
+  requireOperatorConfirmation: boolean;
+  attachSnapshotToSlip: boolean;
+};
 type AiProductCountingSettings = {
   enabled: boolean;
   serviceUrl: string;
   cameraId: string;
-  countingMode: "LINE_CROSSING" | "ZONE_OCCUPANCY" | "MANUAL_REVIEW";
+  countingMode: AiCountingMode;
   productType: string;
   confidenceThreshold: number;
   minBoxWidth: number;
@@ -80,6 +109,8 @@ type AiProductCountingSettings = {
   ignoreZones: string;
   requireOperatorConfirmation: boolean;
   attachSnapshotToSlip: boolean;
+  activeProfileId: string;
+  profiles: AiCountingProfile[];
 };
 type AiCountingWarning = {
   code: string;
@@ -152,16 +183,66 @@ function localAiServiceUrl() {
   return "";
 }
 
-const DEFAULT_CONVEYOR_ROI = "0.04,0.24; 0.78,0.20; 0.97,0.86; 0.06,0.88";
-const DEFAULT_IGNORE_ZONES = "0,0; 1,0; 1,0.18; 0,0.18\n0.84,0.48; 1,0.48; 1,1; 0.84,1";
-
 function numberOrDefault(value: unknown, fallback: number) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function aiCountingDefaults(input?: Partial<AiProductCountingSettings>, fallbackCameraId = ""): AiProductCountingSettings {
+function stringOrDefault(value: unknown, fallback = "") {
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+const AI_PRODUCT_KIND_OPTIONS: Array<{ value: AiProductKind; label: string }> = [
+  { value: "BILLET", label: "Billet" },
+  { value: "LONG_METAL", label: "Long metal bar" },
+  { value: "ROUND_TUBE", label: "Round tube" },
+  { value: "SQUARE_TUBE", label: "Square tube" },
+  { value: "PLASTIC_TUBE", label: "Plastic tube" },
+  { value: "BAG_CARTON", label: "Bags / cartons / crates" },
+  { value: "LIVESTOCK", label: "Livestock" },
+  { value: "CUSTOM", label: "Custom product" }
+];
+
+function aiProductKind(value: unknown): AiProductKind {
+  return AI_PRODUCT_KIND_OPTIONS.some((option) => option.value === value) ? value as AiProductKind : "CUSTOM";
+}
+
+function aiProductKindLabel(value: AiProductKind) {
+  return AI_PRODUCT_KIND_OPTIONS.find((option) => option.value === value)?.label || "Custom product";
+}
+
+function normalizeAiProfile(input: Partial<AiCountingProfile> | undefined, base: Omit<AiProductCountingSettings, "activeProfileId" | "profiles">, fallbackCameraId: string, index: number): AiCountingProfile {
+  const productName = stringOrDefault(input?.productName);
   return {
+    id: stringOrDefault(input?.id, `ai-profile-${Date.now()}-${index}`),
+    name: stringOrDefault(input?.name, productName ? `${productName} counting` : `Counting profile ${index + 1}`),
+    enabled: input?.enabled ?? true,
+    productId: stringOrDefault(input?.productId),
+    productName,
+    productKind: aiProductKind(input?.productKind),
+    cameraId: stringOrDefault(input?.cameraId, base.cameraId || fallbackCameraId),
+    countingMode: input?.countingMode || base.countingMode,
+    productType: stringOrDefault(input?.productType, productName || base.productType || "Product"),
+    confidenceThreshold: numberOrDefault(input?.confidenceThreshold, base.confidenceThreshold),
+    minBoxWidth: numberOrDefault(input?.minBoxWidth, base.minBoxWidth),
+    maxBoxWidth: numberOrDefault(input?.maxBoxWidth, base.maxBoxWidth),
+    minBoxHeight: numberOrDefault(input?.minBoxHeight, base.minBoxHeight),
+    maxBoxHeight: numberOrDefault(input?.maxBoxHeight, base.maxBoxHeight),
+    minAspectRatio: numberOrDefault(input?.minAspectRatio, base.minAspectRatio),
+    maxAspectRatio: numberOrDefault(input?.maxAspectRatio, base.maxAspectRatio),
+    countGateRatio: numberOrDefault(input?.countGateRatio, base.countGateRatio),
+    movementDirection: input?.movementDirection || base.movementDirection,
+    trackingTimeoutFrames: numberOrDefault(input?.trackingTimeoutFrames, base.trackingTimeoutFrames),
+    duplicateWindowSeconds: numberOrDefault(input?.duplicateWindowSeconds, base.duplicateWindowSeconds),
+    conveyorRoi: stringOrDefault(input?.conveyorRoi, base.conveyorRoi),
+    ignoreZones: stringOrDefault(input?.ignoreZones, base.ignoreZones),
+    requireOperatorConfirmation: input?.requireOperatorConfirmation ?? base.requireOperatorConfirmation,
+    attachSnapshotToSlip: input?.attachSnapshotToSlip ?? base.attachSnapshotToSlip
+  };
+}
+
+function aiCountingDefaults(input?: Partial<AiProductCountingSettings>, fallbackCameraId = ""): AiProductCountingSettings {
+  const base: Omit<AiProductCountingSettings, "activeProfileId" | "profiles"> = {
     enabled: Boolean(input?.enabled),
     serviceUrl: input?.serviceUrl || "",
     cameraId: input?.cameraId || fallbackCameraId,
@@ -178,10 +259,42 @@ function aiCountingDefaults(input?: Partial<AiProductCountingSettings>, fallback
     movementDirection: input?.movementDirection || "AUTO",
     trackingTimeoutFrames: numberOrDefault(input?.trackingTimeoutFrames, 45),
     duplicateWindowSeconds: numberOrDefault(input?.duplicateWindowSeconds, 20),
-    conveyorRoi: input?.conveyorRoi || DEFAULT_CONVEYOR_ROI,
-    ignoreZones: input?.ignoreZones || DEFAULT_IGNORE_ZONES,
+    conveyorRoi: input?.conveyorRoi || "",
+    ignoreZones: input?.ignoreZones || "",
     requireOperatorConfirmation: input?.requireOperatorConfirmation ?? true,
     attachSnapshotToSlip: input?.attachSnapshotToSlip ?? true
+  };
+  const rawProfiles = Array.isArray(input?.profiles) ? input.profiles : [];
+  const profiles = rawProfiles.map((profile, index) => normalizeAiProfile(profile, base, fallbackCameraId, index));
+  return {
+    ...base,
+    activeProfileId: profiles.some((profile) => profile.id === input?.activeProfileId) ? input?.activeProfileId || "" : "",
+    profiles
+  };
+}
+
+function aiSettingsFromProfile(settings: AiProductCountingSettings, profile: AiCountingProfile): AiProductCountingSettings {
+  return {
+    ...settings,
+    cameraId: profile.cameraId || settings.cameraId,
+    countingMode: profile.countingMode,
+    productType: profile.productType || profile.productName || settings.productType,
+    confidenceThreshold: profile.confidenceThreshold,
+    minBoxWidth: profile.minBoxWidth,
+    maxBoxWidth: profile.maxBoxWidth,
+    minBoxHeight: profile.minBoxHeight,
+    maxBoxHeight: profile.maxBoxHeight,
+    minAspectRatio: profile.minAspectRatio,
+    maxAspectRatio: profile.maxAspectRatio,
+    countGateRatio: profile.countGateRatio,
+    movementDirection: profile.movementDirection,
+    trackingTimeoutFrames: profile.trackingTimeoutFrames,
+    duplicateWindowSeconds: profile.duplicateWindowSeconds,
+    conveyorRoi: profile.conveyorRoi,
+    ignoreZones: profile.ignoreZones,
+    requireOperatorConfirmation: profile.requireOperatorConfirmation,
+    attachSnapshotToSlip: profile.attachSnapshotToSlip,
+    activeProfileId: profile.id
   };
 }
 
@@ -208,6 +321,14 @@ function parseIgnoreZones(value: string) {
     .map((zone) => parsePolygon(zone))
     .filter((zone): zone is { x: number; y: number }[] => Boolean(zone));
   return zones.length ? zones : undefined;
+}
+
+function formatPolygon(points: { x: number; y: number }[]) {
+  return points.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join("; ");
+}
+
+function formatIgnoreZones(zones: { x: number; y: number }[][]) {
+  return zones.filter((zone) => zone.length > 0).map(formatPolygon).join("\n");
 }
 
 function aiCountingFilters(settings: AiProductCountingSettings) {
@@ -420,6 +541,19 @@ function fmtSlipDateTime(value: string | Date = new Date()) {
   const date = value instanceof Date ? value : new Date(value);
   const pad = (part: number) => String(part).padStart(2, "0");
   return `${pad(date.getMonth() + 1)}-${pad(date.getDate())}-${date.getFullYear()} ${date.getHours()}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function fmtLicenseState(state: LicenseStatus["state"] | undefined) {
+  if (!state) return "Unknown";
+  return state.replace("_", " ").toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function fmtDaysRemaining(days: number | undefined) {
+  if (!Number.isFinite(days)) return "-";
+  if ((days as number) < 0) return "Expired";
+  if (days === 0) return "Expires today";
+  if (days === 1) return "1 day";
+  return `${days} days`;
 }
 
 function can(user: User | null, permission: string) {
@@ -657,7 +791,7 @@ function App() {
         {active === "Users" && <Users disabled={!can(data.user, "MANAGE_USERS")} />}
         {active === "AI Product Counting" && <AiProductCounting data={data} />}
         {active === "Slip Designer" && <SlipDesigner settings={data.settings} disabled={!can(data.user, "CHANGE_SETTINGS")} onRefresh={refresh} />}
-        {active === "Settings" && <Settings settings={data.settings} disabled={!can(data.user, "CHANGE_SETTINGS")} onRefresh={refresh} />}
+        {active === "Settings" && <Settings settings={data.settings} license={data.license} products={data.products} disabled={!can(data.user, "CHANGE_SETTINGS")} onRefresh={refresh} />}
       </section>
 
       {selected && <SlipModal transaction={selected} settings={data.settings} onClose={() => setSelected(null)} onToast={flash} />}
@@ -1647,8 +1781,17 @@ function AiProductCounting({ data }: { data: AppData }) {
   const [snapshotRefresh, setSnapshotRefresh] = useState(Date.now());
   const [moduleMessage, setModuleMessage] = useState("");
   const selectedSlip = openSlips.find((transaction) => transaction.id === selectedSlipId) || null;
-  const selectedCamera = cameras.find((camera) => camera.id === selectedCameraId) || cameras[0] || null;
   const selectedProduct = data.products.find((product) => product.id === selectedProductId) || null;
+  const aiProfiles = settings?.profiles || [];
+  const selectedProfile = selectedProduct
+    ? aiProfiles.find((profile) => profile.enabled && profile.productId === selectedProduct.id) || null
+    : aiProfiles.find((profile) => profile.enabled && profile.id === settings?.activeProfileId) || null;
+  const selectedProductNeedsProfile = Boolean(selectedProduct && !selectedProfile);
+  const effectiveSettings = settings && selectedProfile ? aiSettingsFromProfile(settings, selectedProfile) : settings;
+  const selectedCamera = cameras.find((camera) => camera.id === selectedCameraId) ||
+    cameras.find((camera) => camera.id === selectedProfile?.cameraId) ||
+    cameras[0] ||
+    null;
   const monitoring = Boolean(serviceStatus?.running);
   const detectedCount = Number(serviceStatus?.detectedCount || 0);
   const confirmedCount = Number(serviceStatus?.confirmedCount || 0);
@@ -1675,6 +1818,12 @@ function AiProductCounting({ data }: { data: AppData }) {
       setSelectedProductId(selectedSlip.plannedProductId);
     }
   }, [selectedSlip?.id, selectedSlip?.plannedProductId]);
+
+  useEffect(() => {
+    if (selectedProfile?.cameraId) {
+      setSelectedCameraId(selectedProfile.cameraId);
+    }
+  }, [selectedProfile?.id]);
 
   useEffect(() => {
     if (!settings?.enabled || !serviceBase) return undefined;
@@ -1735,6 +1884,14 @@ function AiProductCounting({ data }: { data: AppData }) {
       setModuleMessage("Select a counting camera before starting AI counting.");
       return;
     }
+    if (selectedProductNeedsProfile) {
+      setModuleMessage(`AI counting profile is not configured for ${selectedProduct?.name}. Configure this product in Settings first.`);
+      return;
+    }
+    if (!effectiveSettings || !parsePolygon(effectiveSettings.conveyorRoi)) {
+      setModuleMessage("Draw the conveyor area in Settings before starting AI counting.");
+      return;
+    }
     try {
       setServiceError("");
       setModuleMessage("");
@@ -1742,10 +1899,13 @@ function AiProductCounting({ data }: { data: AppData }) {
         method: "POST",
         body: JSON.stringify({
           rtspUrl: cameraStreamUrl(selectedCamera) || undefined,
-          mode: settings?.countingMode || "LINE_CROSSING",
-          productType: selectedProduct?.name || selectedSlip.plannedProductName || settings?.productType || "Billets",
-          confidenceThreshold: settings?.confidenceThreshold || 70,
-          filters: settings ? aiCountingFilters(settings) : undefined
+          mode: effectiveSettings?.countingMode || "LINE_CROSSING",
+          profileId: selectedProfile?.id || undefined,
+          productId: selectedProduct?.id || selectedSlip.plannedProductId || undefined,
+          productKind: selectedProfile?.productKind || undefined,
+          productType: selectedProfile?.productType || selectedProduct?.name || selectedSlip.plannedProductName || effectiveSettings?.productType || "Product",
+          confidenceThreshold: effectiveSettings?.confidenceThreshold || 70,
+          filters: effectiveSettings ? aiCountingFilters(effectiveSettings) : undefined
         })
       });
       setServiceStatus(status);
@@ -1832,14 +1992,16 @@ function AiProductCounting({ data }: { data: AppData }) {
               }}>
                 <option value="">Use configured product type</option>
                 {data.products.map((product) => (
-                  <option key={product.id} value={product.id}>{product.name}</option>
+                  <option key={product.id} value={product.id}>
+                    {product.name}{aiProfiles.some((profile) => profile.enabled && profile.productId === product.id) ? "" : " (needs AI profile)"}
+                  </option>
                 ))}
               </select>
             </label>
           </div>
 
           <div className="ai-camera-stage">
-            {serviceStatus?.hasSnapshot ? (
+            {monitoring && serviceStatus?.hasSnapshot ? (
               <figure className="ai-service-preview">
                 <img src={`${serviceBase}/api/counting/snapshot.jpg?refresh=${snapshotRefresh}`} alt="AI product counting camera preview" />
                 <figcaption>
@@ -1853,8 +2015,9 @@ function AiProductCounting({ data }: { data: AppData }) {
           </div>
 
           <div className="ai-module-meta">
-            <span>Mode<strong>{settings.countingMode.replace("_", " ")}</strong></span>
-            <span>Confidence threshold<strong>{settings.confidenceThreshold}%</strong></span>
+            <span>Mode<strong>{(effectiveSettings || settings).countingMode.replace("_", " ")}</strong></span>
+            <span>Profile<strong>{selectedProfile?.name || "Default settings"}</strong></span>
+            <span>Confidence threshold<strong>{(effectiveSettings || settings).confidenceThreshold}%</strong></span>
             <span>Slip vehicle<strong>{selectedSlip?.vehicleNo || "-"}</strong></span>
             <span>Movement<strong>{selectedSlip?.movementType || "-"}</strong></span>
           </div>
@@ -1862,19 +2025,24 @@ function AiProductCounting({ data }: { data: AppData }) {
 
         <aside className="ai-module-side">
           <AiProductCountingPanel
-            settings={settings}
+            settings={effectiveSettings || settings}
             cameraName={selectedCamera?.name || "No camera selected"}
-            productName={selectedProduct?.name || selectedSlip?.plannedProductName || settings.productType}
+            productName={selectedProfile?.productType || selectedProduct?.name || selectedSlip?.plannedProductName || settings.productType}
             detectedCount={detectedCount}
             confirmedCount={confirmedCount}
             warnings={countingWarnings}
             monitoring={monitoring}
-            disabled={cameras.length === 0 || !serviceBase}
+            disabled={cameras.length === 0 || !serviceBase || selectedProductNeedsProfile}
             onStart={startMonitoring}
             onStop={stopMonitoring}
             onReset={resetCount}
             onConfirm={confirmCount}
           />
+          {selectedProductNeedsProfile && (
+            <p className="ai-module-message warning">
+              No AI counting profile is configured for {selectedProduct?.name}. Add a product profile in Settings before starting.
+            </p>
+          )}
           {!serviceBase && (
             <p className="ai-module-message warning">
               Configure the AI service URL in Settings as an HTTP address. Keep the camera RTSP stream in the selected camera settings.
@@ -2030,6 +2198,147 @@ function CameraWall({ cameras, large = false }: { cameras: CameraSetting[]; larg
       </div>
       <p className="mt-2 text-xs font-medium text-slate-500">Images are captured automatically during first weigh and final weigh.</p>
     </div>
+  );
+}
+
+function ZoneVisualEditor({
+  title,
+  description,
+  mode,
+  value,
+  onChange,
+  camera,
+  disabled
+}: {
+  title: string;
+  description: string;
+  mode: "roi" | "ignore";
+  value: string;
+  onChange: (value: string) => void;
+  camera: CameraSetting | null;
+  disabled?: boolean;
+}) {
+  const [refreshKey, setRefreshKey] = useState(Date.now());
+  const [activeZoneIndex, setActiveZoneIndex] = useState(0);
+  const roiPoints = useMemo(() => parsePolygon(value) || [], [value]);
+  const ignoreZones = useMemo(() => parseIgnoreZones(value) || [], [value]);
+  const activeIgnoreZone = ignoreZones[activeZoneIndex] || [];
+  const canEdit = !disabled && Boolean(camera);
+  const pointCount = mode === "roi" ? roiPoints.length : activeIgnoreZone.length;
+
+  useEffect(() => {
+    if (mode !== "ignore") return;
+    if (activeZoneIndex > ignoreZones.length) setActiveZoneIndex(Math.max(0, ignoreZones.length - 1));
+  }, [activeZoneIndex, ignoreZones.length, mode]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setRefreshKey(Date.now()), 5000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const addPoint = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (!canEdit) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const point = {
+      x: Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)),
+      y: Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height))
+    };
+    if (mode === "roi") {
+      onChange(formatPolygon([...roiPoints, point]));
+      return;
+    }
+    const nextZones = [...ignoreZones];
+    const targetIndex = activeZoneIndex < nextZones.length ? activeZoneIndex : nextZones.length;
+    nextZones[targetIndex] = [...(nextZones[targetIndex] || []), point];
+    setActiveZoneIndex(targetIndex);
+    onChange(formatIgnoreZones(nextZones));
+  };
+
+  const undoPoint = () => {
+    if (mode === "roi") {
+      onChange(formatPolygon(roiPoints.slice(0, -1)));
+      return;
+    }
+    const nextZones = [...ignoreZones];
+    if (!nextZones[activeZoneIndex]) return;
+    nextZones[activeZoneIndex] = nextZones[activeZoneIndex].slice(0, -1);
+    onChange(formatIgnoreZones(nextZones));
+  };
+
+  const clearActive = () => {
+    if (mode === "roi") {
+      onChange("");
+      return;
+    }
+    const nextZones = ignoreZones.filter((_zone, index) => index !== activeZoneIndex);
+    setActiveZoneIndex(Math.max(0, activeZoneIndex - 1));
+    onChange(formatIgnoreZones(nextZones));
+  };
+
+  const addIgnoreZone = () => {
+    setActiveZoneIndex(ignoreZones.length);
+  };
+
+  return (
+    <section className="zone-editor-card">
+      <div className="zone-editor-head">
+        <div>
+          <h4>{title}</h4>
+          <p>{description}</p>
+        </div>
+        <span>{mode === "roi" ? `${roiPoints.length} points` : `${ignoreZones.length} zones`}</span>
+      </div>
+      <div className={canEdit ? "zone-editor-stage" : "zone-editor-stage disabled"} onClick={addPoint} role="presentation">
+        {camera ? (
+          <img src={`/api/cameras/${camera.id}/preview.svg?refresh=${refreshKey}`} alt={`${camera.name} zone editor preview`} />
+        ) : (
+          <div className="zone-editor-empty">Select a counting camera to draw on the camera view.</div>
+        )}
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+          {mode === "roi" && roiPoints.length >= 2 && (
+            <polyline points={roiPoints.map((point) => `${point.x * 100},${point.y * 100}`).join(" ")} className="zone-editor-roi-line" />
+          )}
+          {mode === "roi" && roiPoints.length >= 3 && (
+            <polygon points={roiPoints.map((point) => `${point.x * 100},${point.y * 100}`).join(" ")} className="zone-editor-roi-fill" />
+          )}
+          {mode === "ignore" && ignoreZones.map((zone, index) => (
+            zone.length >= 2 ? (
+              <g key={`ignore-zone-${index}`}>
+                <polyline points={zone.map((point) => `${point.x * 100},${point.y * 100}`).join(" ")} className={index === activeZoneIndex ? "zone-editor-ignore-line active" : "zone-editor-ignore-line"} />
+                {zone.length >= 3 && <polygon points={zone.map((point) => `${point.x * 100},${point.y * 100}`).join(" ")} className={index === activeZoneIndex ? "zone-editor-ignore-fill active" : "zone-editor-ignore-fill"} />}
+              </g>
+            ) : null
+          ))}
+          {(mode === "roi" ? roiPoints : activeIgnoreZone).map((point, index) => (
+            <g key={`${mode}-point-${index}`}>
+              <circle cx={point.x * 100} cy={point.y * 100} r="1.3" className={mode === "roi" ? "zone-editor-roi-point" : "zone-editor-ignore-point"} />
+              <text x={Math.min(96, point.x * 100 + 1.6)} y={Math.max(4, point.y * 100 - 1.6)}>{index + 1}</text>
+            </g>
+          ))}
+        </svg>
+      </div>
+      <div className="zone-editor-toolbar">
+        {mode === "ignore" && (
+          <>
+            <label>
+              Active ignore zone
+              <select value={activeZoneIndex} onChange={(event) => setActiveZoneIndex(Number(event.target.value))} disabled={disabled}>
+                {ignoreZones.map((_zone, index) => <option key={index} value={index}>Zone {index + 1}</option>)}
+                <option value={ignoreZones.length}>New zone</option>
+              </select>
+            </label>
+            <button className="btn-secondary min-h-8 px-3 py-1 text-sm" type="button" onClick={addIgnoreZone} disabled={disabled}>New Ignore Zone</button>
+          </>
+        )}
+        <button className="btn-secondary min-h-8 px-3 py-1 text-sm" type="button" onClick={undoPoint} disabled={disabled || pointCount === 0}>Undo Point</button>
+        <button className="btn-danger min-h-8 px-3 py-1 text-sm" type="button" onClick={clearActive} disabled={disabled || (mode === "roi" ? roiPoints.length === 0 : ignoreZones.length === 0)}>Clear {mode === "roi" ? "Conveyor Area" : "Active Zone"}</button>
+      </div>
+      <p className="zone-editor-help">Click the camera image to add points. Use at least 3 points. The numbers show the point order.</p>
+      <details className="zone-editor-advanced">
+        <summary>Advanced coordinates</summary>
+        <textarea rows={mode === "roi" ? 3 : 4} value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled} />
+      </details>
+    </section>
   );
 }
 
@@ -2416,7 +2725,47 @@ function settingsWeighbridges(settings: Settings): WeighbridgeSetting[] {
   }];
 }
 
-function Settings({ settings, disabled, onRefresh }: { settings: Settings; disabled: boolean; onRefresh: () => Promise<void> }) {
+function LicenseStatusPanel({ license }: { license: LicenseStatus | null }) {
+  const statusClass = license?.state === "ACTIVE" || license?.state === "TRIAL"
+    ? "license-pill-active"
+    : license?.state === "EXPIRED" || license?.state === "INVALID"
+      ? "license-pill-danger"
+      : "license-pill-warning";
+  const daysRemaining = license?.daysRemaining;
+  const expiringSoon = license?.valid && Number.isFinite(daysRemaining) && (daysRemaining as number) <= 30;
+
+  return (
+    <section className="settings-license-card">
+      <div className="settings-license-head">
+        <div>
+          <p className="slip-eyebrow">Licensing</p>
+          <h3 className="section-title mb-0">License Status</h3>
+          <p>{license?.message || "License status is not available."}</p>
+        </div>
+        <span className={`license-pill ${statusClass}`}>{fmtLicenseState(license?.state)}</span>
+      </div>
+      <div className="settings-license-grid">
+        <span>Customer<strong>{license?.customerName || "-"}</strong></span>
+        <span>License ID<strong>{license?.licenseId || "-"}</strong></span>
+        <span>Expires<strong>{license?.expiresAt ? fmtSlipDateTime(license.expiresAt) : "-"}</strong></span>
+        <span>Days remaining<strong>{fmtDaysRemaining(daysRemaining)}</strong></span>
+        <span>Max users<strong>{license?.maxUsers || "-"}</strong></span>
+        <span>Weighbridges<strong>{license?.maxWeighbridges || "-"}</strong></span>
+      </div>
+      {license?.modules?.length ? (
+        <div className="settings-license-modules">
+          <span>Modules</span>
+          <div>
+            {license.modules.map((moduleName) => <strong key={moduleName}>{moduleName}</strong>)}
+          </div>
+        </div>
+      ) : null}
+      {expiringSoon && <p className="settings-license-warning">This license is close to expiry. Please prepare a renewal before the expiry date.</p>}
+    </section>
+  );
+}
+
+function Settings({ settings, license, products, disabled, onRefresh }: { settings: Settings; license: LicenseStatus | null; products: Product[]; disabled: boolean; onRefresh: () => Promise<void> }) {
   const [weighbridges, setWeighbridges] = useState<WeighbridgeSetting[]>(() => settingsWeighbridges(settings));
   const [expandedWeighbridgeIds, setExpandedWeighbridgeIds] = useState<string[]>([]);
   const [cameras, setCameras] = useState<CameraSetting[]>(() => [...settings.cameras].sort((left, right) => left.displayOrder - right.displayOrder));
@@ -2428,6 +2777,7 @@ function Settings({ settings, disabled, onRefresh }: { settings: Settings; disab
   const [selectVehicleVisible, setSelectVehicleVisible] = useState(Boolean(settings.slipSelectVehicleVisible));
   const [searchControlsVisible, setSearchControlsVisible] = useState(Boolean(settings.slipSearchControlsVisible));
   const [aiProductCounting, setAiProductCounting] = useState<AiProductCountingSettings>(() => aiCountingDefaults(settings.aiProductCounting, settings.cameras[0]?.id || ""));
+  const [expandedAiProfileIds, setExpandedAiProfileIds] = useState<string[]>([]);
   const [collapsedSettingsSections, setCollapsedSettingsSections] = useState({
     slipEntry: true,
     aiCounting: true,
@@ -2544,6 +2894,56 @@ function Settings({ settings, disabled, onRefresh }: { settings: Settings; disab
     setAiProductCounting((current) => ({ ...current, ...changes }));
   };
 
+  const addAiProfile = () => {
+    const profileIndex = aiProductCounting.profiles.length;
+    const unusedProduct = products.find((product) => !aiProductCounting.profiles.some((profile) => profile.productId === product.id));
+    const profile = normalizeAiProfile({
+      productId: unusedProduct?.id || "",
+      productName: unusedProduct?.name || "",
+      productType: unusedProduct?.name || aiProductCounting.productType,
+      cameraId: aiProductCounting.cameraId || cameras[0]?.id || ""
+    }, aiProductCounting, aiProductCounting.cameraId || cameras[0]?.id || "", profileIndex);
+    setAiProductCounting((current) => ({
+      ...current,
+      activeProfileId: profile.id,
+      profiles: [...current.profiles, profile]
+    }));
+    setExpandedAiProfileIds((current) => [...current, profile.id]);
+  };
+
+  const updateAiProfile = (id: string, changes: Partial<AiCountingProfile>) => {
+    setAiProductCounting((current) => ({
+      ...current,
+      profiles: current.profiles.map((profile) => profile.id === id ? { ...profile, ...changes } : profile)
+    }));
+  };
+
+  const selectAiProfileProduct = (id: string, productId: string) => {
+    const product = products.find((item) => item.id === productId);
+    updateAiProfile(id, {
+      productId,
+      productName: product?.name || "",
+      productType: product?.name || "",
+      name: product?.name ? `${product.name} counting` : "Counting profile"
+    });
+  };
+
+  const deleteAiProfile = (id: string) => {
+    setAiProductCounting((current) => {
+      const profiles = current.profiles.filter((profile) => profile.id !== id);
+      return {
+        ...current,
+        profiles,
+        activeProfileId: current.activeProfileId === id ? profiles[0]?.id || "" : current.activeProfileId
+      };
+    });
+    setExpandedAiProfileIds((current) => current.filter((profileId) => profileId !== id));
+  };
+
+  const toggleAiProfile = (id: string) => {
+    setExpandedAiProfileIds((current) => current.includes(id) ? current.filter((profileId) => profileId !== id) : [...current, id]);
+  };
+
   const selectedAiCamera = cameras.find((camera) => camera.id === aiProductCounting.cameraId) || null;
 
   const addAiCountingCamera = () => {
@@ -2601,6 +3001,7 @@ function Settings({ settings, disabled, onRefresh }: { settings: Settings; disab
       });
       setExpandedWeighbridgeIds([]);
       setExpandedCameraIds([]);
+      setExpandedAiProfileIds([]);
     } catch (error) {
       setMessage(errorMessage(error, "Could not save settings"));
       setMessageTone("error");
@@ -2622,6 +3023,8 @@ function Settings({ settings, disabled, onRefresh }: { settings: Settings; disab
               <label className="field">Logo URL<input name="logoUrl" defaultValue={settings.logoUrl} /></label>
             </div>
           </div>
+
+          <LicenseStatusPanel license={license} />
 
           <div className="settings-section-card">
             <button className="settings-section-header" type="button" onClick={() => toggleSettingsSection("slipEntry")} aria-expanded={!collapsedSettingsSections.slipEntry}>
@@ -2753,14 +3156,142 @@ function Settings({ settings, disabled, onRefresh }: { settings: Settings; disab
                   <label className="field">Duplicate window<input type="number" min={2} max={120} value={aiProductCounting.duplicateWindowSeconds} onChange={(event) => updateAiProductCounting({ duplicateWindowSeconds: Number(event.target.value) })} /></label>
                 </div>
                 <div className="grid grid-cols-2 gap-3 max-lg:grid-cols-1">
-                  <label className="field">Conveyor ROI editor
-                    <textarea rows={3} value={aiProductCounting.conveyorRoi} onChange={(event) => updateAiProductCounting({ conveyorRoi: event.target.value })} />
-                    <span className="text-xs font-medium text-slate-500">Use normalized x,y points separated by semicolons. Only this belt polygon is counted.</span>
-                  </label>
-                  <label className="field">Ignore zone editor
-                    <textarea rows={3} value={aiProductCounting.ignoreZones} onChange={(event) => updateAiProductCounting({ ignoreZones: event.target.value })} />
-                    <span className="text-xs font-medium text-slate-500">Use one polygon per line for walkways, crane paths, or upper lifting zones.</span>
-                  </label>
+                  <ZoneVisualEditor
+                    title="Conveyor ROI"
+                    description="Draw the conveyor belt area. Only detections inside this shape are allowed to count."
+                    mode="roi"
+                    value={aiProductCounting.conveyorRoi}
+                    onChange={(conveyorRoi) => updateAiProductCounting({ conveyorRoi })}
+                    camera={selectedAiCamera}
+                    disabled={disabled}
+                  />
+                  <ZoneVisualEditor
+                    title="Ignore Zones"
+                    description="Draw walkways, crane paths, lifting areas, glare zones, or machinery that must never affect counts."
+                    mode="ignore"
+                    value={aiProductCounting.ignoreZones}
+                    onChange={(ignoreZones) => updateAiProductCounting({ ignoreZones })}
+                    camera={selectedAiCamera}
+                    disabled={disabled}
+                  />
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-white p-3">
+                  <div className="settings-ai-camera-head">
+                    <div>
+                      <h4>Product Counting Profiles</h4>
+                      <p>Configure a separate AI rule set for each product shape or customer requirement.</p>
+                    </div>
+                    <button className="btn-primary min-h-8 px-3 py-1 text-sm" type="button" onClick={addAiProfile} disabled={disabled}>Add Product Profile</button>
+                  </div>
+                  {aiProductCounting.profiles.length === 0 ? (
+                    <p className="mt-3 rounded-md border border-dashed border-slate-300 bg-slate-50 px-3 py-3 text-sm font-semibold text-slate-600">
+                      No product-specific profiles yet. The AI page will use the default settings until a profile is added.
+                    </p>
+                  ) : (
+                    <div className="mt-3 grid gap-3">
+                      {aiProductCounting.profiles.map((profile, index) => {
+                        const expanded = expandedAiProfileIds.includes(profile.id);
+                        const profileCamera = cameras.find((camera) => camera.id === profile.cameraId) || selectedAiCamera;
+                        return (
+                          <article className="collapsible-setting-card" key={profile.id}>
+                            <div className="setting-card-summary">
+                              <button className="camera-card-toggle" type="button" onClick={() => toggleAiProfile(profile.id)} aria-expanded={expanded}>
+                                <strong>{index + 1}. {profile.name || "Product counting profile"}</strong>
+                                <span>
+                                  {profile.productName || "Custom product"} | {aiProductKindLabel(profile.productKind)} | {profile.cameraId ? cameras.find((camera) => camera.id === profile.cameraId)?.name || "Camera selected" : "No camera"}
+                                </span>
+                              </button>
+                              <div className="camera-card-badges">
+                                <span className={profile.enabled ? "badge-on" : "badge-off"}>{profile.enabled ? "Enabled" : "Disabled"}</span>
+                                <span className={aiProductCounting.activeProfileId === profile.id ? "badge-on" : "badge-off"}>{aiProductCounting.activeProfileId === profile.id ? "Default" : "Profile"}</span>
+                                <span className="badge-on">{profile.confidenceThreshold}%</span>
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                <button className="btn-secondary min-h-8 px-3 py-1 text-sm" type="button" onClick={() => toggleAiProfile(profile.id)}>{expanded ? "Close" : "Edit"}</button>
+                                <button className="btn-secondary min-h-8 px-3 py-1 text-sm" type="button" onClick={() => updateAiProductCounting({ activeProfileId: profile.id })}>Set Default</button>
+                                <button className="btn-danger min-h-8 px-3 py-1 text-sm" type="button" onClick={() => deleteAiProfile(profile.id)} disabled={disabled}>Delete</button>
+                              </div>
+                            </div>
+                            {expanded && (
+                              <div className="mt-3 grid gap-3 border-t border-slate-200 pt-3">
+                                <div className="grid grid-cols-4 gap-3 max-xl:grid-cols-2 max-sm:grid-cols-1">
+                                  <label className="field">Profile name<input value={profile.name} onChange={(event) => updateAiProfile(profile.id, { name: event.target.value })} /></label>
+                                  <label className="field">Product<select value={profile.productId} onChange={(event) => selectAiProfileProduct(profile.id, event.target.value)}>
+                                    <option value="">Custom / not in Product Master</option>
+                                    {products.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
+                                  </select></label>
+                                  <label className="field">Product structure<select value={profile.productKind} onChange={(event) => updateAiProfile(profile.id, { productKind: event.target.value as AiProductKind })}>
+                                    {AI_PRODUCT_KIND_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                                  </select></label>
+                                  <label className="field">Camera<select value={profile.cameraId} onChange={(event) => updateAiProfile(profile.id, { cameraId: event.target.value })}>
+                                    <option value="">Use default camera</option>
+                                    {cameras.map((camera) => <option key={camera.id} value={camera.id}>{camera.name} - {camera.position}</option>)}
+                                  </select></label>
+                                  <label className="field">Detection label / class<input value={profile.productType} onChange={(event) => updateAiProfile(profile.id, { productType: event.target.value })} placeholder="billet, square tube, round tube" /></label>
+                                  <label className="field">Counting mode<select value={profile.countingMode} onChange={(event) => updateAiProfile(profile.id, { countingMode: event.target.value as AiCountingMode })}>
+                                    <option value="LINE_CROSSING">Line crossing</option>
+                                    <option value="ZONE_OCCUPANCY">Zone occupancy</option>
+                                    <option value="MANUAL_REVIEW">Manual review</option>
+                                  </select></label>
+                                  <label className="field">Movement direction<select value={profile.movementDirection} onChange={(event) => updateAiProfile(profile.id, { movementDirection: event.target.value as AiMovementDirection })}>
+                                    <option value="AUTO">Auto learn</option>
+                                    <option value="LEFT_TO_RIGHT">Left to right</option>
+                                    <option value="RIGHT_TO_LEFT">Right to left</option>
+                                  </select></label>
+                                  <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
+                                    <input type="checkbox" checked={profile.enabled} onChange={(event) => updateAiProfile(profile.id, { enabled: event.target.checked })} />
+                                    Profile enabled
+                                  </label>
+                                </div>
+                                <div className="grid grid-cols-6 gap-3 max-xl:grid-cols-3 max-sm:grid-cols-1">
+                                  <label className="field">Confidence<input type="number" min={1} max={99} value={profile.confidenceThreshold} onChange={(event) => updateAiProfile(profile.id, { confidenceThreshold: Number(event.target.value) })} /></label>
+                                  <label className="field">Min width<input type="number" min={10} max={900} value={profile.minBoxWidth} onChange={(event) => updateAiProfile(profile.id, { minBoxWidth: Number(event.target.value) })} /></label>
+                                  <label className="field">Max width<input type="number" min={10} max={960} value={profile.maxBoxWidth} onChange={(event) => updateAiProfile(profile.id, { maxBoxWidth: Number(event.target.value) })} /></label>
+                                  <label className="field">Min height<input type="number" min={4} max={300} value={profile.minBoxHeight} onChange={(event) => updateAiProfile(profile.id, { minBoxHeight: Number(event.target.value) })} /></label>
+                                  <label className="field">Max height<input type="number" min={4} max={500} value={profile.maxBoxHeight} onChange={(event) => updateAiProfile(profile.id, { maxBoxHeight: Number(event.target.value) })} /></label>
+                                  <label className="field">Count line<input type="number" min={0.1} max={0.9} step={0.01} value={profile.countGateRatio} onChange={(event) => updateAiProfile(profile.id, { countGateRatio: Number(event.target.value) })} /></label>
+                                  <label className="field">Min aspect<input type="number" min={1.2} max={40} step={0.1} value={profile.minAspectRatio} onChange={(event) => updateAiProfile(profile.id, { minAspectRatio: Number(event.target.value) })} /></label>
+                                  <label className="field">Max aspect<input type="number" min={1.2} max={80} step={0.1} value={profile.maxAspectRatio} onChange={(event) => updateAiProfile(profile.id, { maxAspectRatio: Number(event.target.value) })} /></label>
+                                  <label className="field">Tracking timeout<input type="number" min={10} max={240} value={profile.trackingTimeoutFrames} onChange={(event) => updateAiProfile(profile.id, { trackingTimeoutFrames: Number(event.target.value) })} /></label>
+                                  <label className="field">Duplicate window<input type="number" min={2} max={120} value={profile.duplicateWindowSeconds} onChange={(event) => updateAiProfile(profile.id, { duplicateWindowSeconds: Number(event.target.value) })} /></label>
+                                </div>
+                                <div className="grid grid-cols-2 gap-3 max-lg:grid-cols-1">
+                                  <ZoneVisualEditor
+                                    title="Conveyor ROI for this product"
+                                    description="Draw the conveyor area for this product only."
+                                    mode="roi"
+                                    value={profile.conveyorRoi}
+                                    onChange={(conveyorRoi) => updateAiProfile(profile.id, { conveyorRoi })}
+                                    camera={profileCamera}
+                                    disabled={disabled}
+                                  />
+                                  <ZoneVisualEditor
+                                    title="Ignore zones for this product"
+                                    description="Draw areas to ignore for this product, such as walkways, crane movement, glare, or upper lifting zones."
+                                    mode="ignore"
+                                    value={profile.ignoreZones}
+                                    onChange={(ignoreZones) => updateAiProfile(profile.id, { ignoreZones })}
+                                    camera={profileCamera}
+                                    disabled={disabled}
+                                  />
+                                </div>
+                                <div className="flex flex-wrap gap-3 text-sm text-slate-700">
+                                  <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 font-medium">
+                                    <input type="checkbox" checked={profile.requireOperatorConfirmation} onChange={(event) => updateAiProfile(profile.id, { requireOperatorConfirmation: event.target.checked })} />
+                                    Require confirmation
+                                  </label>
+                                  <label className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 font-medium">
+                                    <input type="checkbox" checked={profile.attachSnapshotToSlip} onChange={(event) => updateAiProfile(profile.id, { attachSnapshotToSlip: event.target.checked })} />
+                                    Attach snapshot
+                                  </label>
+                                </div>
+                              </div>
+                            )}
+                          </article>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
                 <div className="ai-training-rules">
                   <div className="ai-training-rules-head">

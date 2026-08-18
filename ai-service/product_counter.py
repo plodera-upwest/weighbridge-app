@@ -1,3 +1,4 @@
+import math
 import os
 import threading
 import time
@@ -104,8 +105,9 @@ class ProductCounter:
         self.max_aspect_ratio = 28.0
         self.movement_direction = "AUTO"
         self.tracking_timeout_frames = 45
-        self.conveyor_roi = self._default_conveyor_roi()
-        self.ignore_zones = self._default_ignore_zones()
+        self.conveyor_roi: List[Tuple[float, float]] = []
+        self.ignore_zones: List[List[Tuple[float, float]]] = []
+        self.show_debug_overlay = os.environ.get("AI_SHOW_DEBUG_OVERLAY", "").strip().lower() in {"1", "true", "yes", "on"}
 
     def start(self, rtsp_url: str, mode: str, product_type: str, confidence_threshold: int, filters: Optional[CountingFilters] = None) -> None:
         if cv2 is None or np is None:
@@ -139,6 +141,10 @@ class ProductCounter:
             self.duplicate_y_tolerance = int(self._configured_float("AI_DUPLICATE_Y_TOLERANCE", 45.0, 15.0, 140.0))
             self.recent_gate_counts = []
             self._apply_filters(filters)
+            if not self.conveyor_roi:
+                self.running = False
+                self.message = "Conveyor ROI is not configured"
+                raise RuntimeError("Conveyor ROI is required. Draw the conveyor area in Settings before starting AI counting.")
         self.thread = threading.Thread(target=self._run, args=(rtsp_url,), daemon=True)
         self.thread.start()
 
@@ -148,6 +154,9 @@ class ProductCounter:
             self.thread.join(timeout=2)
         with self.lock:
             self.running = False
+            self.latest_jpeg = None
+            self.frame_size = "-"
+            self.fps = 0.0
             if self.message not in {"Idle", "Stopped"}:
                 self.message = "Stopped"
 
@@ -163,6 +172,10 @@ class ProductCounter:
             self.distorted_frames = 0
             self.expected_direction = 0
             self.recent_gate_counts = []
+            if not self.running:
+                self.latest_jpeg = None
+                self.frame_size = "-"
+                self.fps = 0.0
             self.message = "Counter reset"
 
     def confirm(self) -> None:
@@ -172,6 +185,7 @@ class ProductCounter:
 
     def status(self) -> dict:
         with self.lock:
+            last_frame_age = round(time.time() - self.last_frame_at, 2) if self.last_frame_at else None
             return {
                 "running": self.running,
                 "detectedCount": self.detected_count,
@@ -182,7 +196,8 @@ class ProductCounter:
                 "message": self.message,
                 "fps": round(self.fps, 2),
                 "frameSize": self.frame_size,
-                "hasSnapshot": self.latest_jpeg is not None,
+                "hasSnapshot": self.running and self.latest_jpeg is not None,
+                "lastFrameAgeSeconds": last_frame_age,
                 "warnings": list(self.warnings),
                 "activeTracks": len(self.tracks),
             }
@@ -195,8 +210,8 @@ class ProductCounter:
 
     def _run(self, rtsp_url: str) -> None:
         os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp")
-        capture = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
-        if not capture.isOpened():
+        capture = self._open_capture(rtsp_url)
+        if capture is None:
             with self.lock:
                 self.running = False
                 self.message = "Camera connection failed"
@@ -205,17 +220,81 @@ class ProductCounter:
         subtractor = cv2.createBackgroundSubtractorMOG2(history=450, varThreshold=32, detectShadows=True)
         last_tick = time.time()
         frames_since_tick = 0
+        last_fingerprint = None
+        stale_frames = 0
+        failed_reads = 0
 
         while not self.stop_event.is_set():
+            if capture is None:
+                capture = self._open_capture(rtsp_url)
+                if capture is None:
+                    with self.lock:
+                        self.message = "Camera reconnect failed"
+                    time.sleep(1.0)
+                    continue
+                subtractor = cv2.createBackgroundSubtractorMOG2(history=450, varThreshold=32, detectShadows=True)
+                last_fingerprint = None
+                stale_frames = 0
+                failed_reads = 0
+
             ok, frame = capture.read()
             if not ok:
+                failed_reads += 1
                 with self.lock:
                     self.message = "Waiting for camera frames"
+                if failed_reads >= 20:
+                    capture.release()
+                    capture = self._open_capture(rtsp_url)
+                    subtractor = cv2.createBackgroundSubtractorMOG2(history=450, varThreshold=32, detectShadows=True)
+                    last_fingerprint = None
+                    stale_frames = 0
+                    failed_reads = 0
+                    with self.lock:
+                        self.message = "Camera stream reconnected" if capture is not None else "Camera reconnect failed"
+                    if capture is None:
+                        time.sleep(1.0)
+                        capture = self._open_capture(rtsp_url)
                 time.sleep(0.2)
                 continue
 
+            failed_reads = 0
             frame = self._resize(frame, 960)
             height, width = frame.shape[:2]
+            fingerprint = self._frame_fingerprint(frame)
+            if last_fingerprint is not None:
+                fingerprint_delta = float(np.mean(np.abs(fingerprint.astype(np.int16) - last_fingerprint.astype(np.int16))))
+                stale_frames = stale_frames + 1 if fingerprint_delta < 0.08 else 0
+            last_fingerprint = fingerprint
+            if stale_frames >= 60:
+                with self.lock:
+                    self.message = "Camera stream frozen; reconnecting"
+                    self._push_warning_locked("CAMERA_RECONNECT", "WARNING", "Camera image stopped changing; reconnecting to the RTSP stream.")
+                capture.release()
+                time.sleep(0.5)
+                capture = self._open_capture(rtsp_url)
+                subtractor = cv2.createBackgroundSubtractorMOG2(history=450, varThreshold=32, detectShadows=True)
+                last_fingerprint = None
+                stale_frames = 0
+                frames_since_tick = 0
+                last_tick = time.time()
+                if capture is None:
+                    with self.lock:
+                        self.message = "Camera reconnect failed"
+                    time.sleep(1.0)
+                    capture = self._open_capture(rtsp_url)
+                continue
+
+            if self._frame_has_decode_distortion(frame):
+                with self.lock:
+                    self.running = True
+                    self.last_frame_at = time.time()
+                    self.distorted_frames += 1
+                    self.message = "Camera frame unstable"
+                    if self.distorted_frames >= 3:
+                        self._push_warning_locked("FRAME_DISTORTION", "WARNING", "Camera stream produced a distorted frame; keeping the last clean image.")
+                time.sleep(0.03)
+                continue
+
             gate_x = int(width * self.gate_ratio)
             gate_band_width = max(18, int(width * 0.035))
             self.frame_index += 1
@@ -236,16 +315,14 @@ class ProductCounter:
                 self._update_tracks(detections, gate_x, gate_band_width)
 
             annotated = frame.copy()
-            self._draw_counting_zones(annotated, width, height)
-            cv2.line(annotated, (gate_x, 0), (gate_x, height), (37, 99, 235), 2)
-            cv2.rectangle(annotated, (max(0, gate_x - gate_band_width), 0), (min(width - 1, gate_x + gate_band_width), height), (37, 99, 235), 1)
-            cv2.putText(annotated, "Count gate", (max(8, gate_x - 78), 24), cv2.FONT_HERSHEY_SIMPLEX, 0.58, (255, 237, 213), 2)
+            if self.show_debug_overlay:
+                self._draw_counting_zones(annotated, width, height)
+                cv2.line(annotated, (gate_x, 0), (gate_x, height), (0, 132, 255), 1)
+                cv2.putText(annotated, "Count gate", (max(8, gate_x - 66), 24), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (255, 237, 213), 1)
             for detection in detections:
-                x, y, w, h = detection.rect
                 box = np.array(detection.box, dtype=np.int32)
-                cv2.polylines(annotated, [box], True, (0, 0, 255), 2)
-                label = f"B{detection.track_id or '-'} {detection.confidence}%"
-                cv2.putText(annotated, label, (x, max(18, y - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (255, 255, 255), 2)
+                cv2.polylines(annotated, [box], True, (0, 0, 255), 1)
+                self._draw_detection_label(annotated, detection, width, height)
 
             with self.lock:
                 count = self.detected_count
@@ -276,28 +353,48 @@ class ProductCounter:
                 self.last_frame_at = now
                 self.message = scene_message
 
-        capture.release()
+        if capture is not None:
+            capture.release()
         with self.lock:
             self.running = False
             self.message = "Stopped"
+
+    @staticmethod
+    def _open_capture(rtsp_url: str):
+        capture = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
+        if capture.isOpened():
+            return capture
+        capture.release()
+        return None
+
+    @staticmethod
+    def _frame_fingerprint(frame):
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        small = cv2.resize(gray, (32, 18), interpolation=cv2.INTER_AREA)
+        return small
 
     def _build_billet_mask(self, frame, subtractor):
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         b_channel, g_channel, r_channel = cv2.split(frame)
         h_channel, s_channel, v_channel = cv2.split(hsv)
 
-        white_hot = cv2.inRange(v_channel, 235, 255)
         orange_hot = cv2.inRange(hsv, np.array([0, 55, 150]), np.array([42, 255, 255]))
         red_hot = cv2.inRange(hsv, np.array([165, 45, 145]), np.array([179, 255, 255]))
         red_dominant = ((r_channel > 165) & (r_channel > g_channel * 1.05) & (r_channel > b_channel * 1.35)).astype(np.uint8) * 255
 
-        hot_mask = cv2.bitwise_or(white_hot, orange_hot)
-        hot_mask = cv2.bitwise_or(hot_mask, red_hot)
-        hot_mask = cv2.bitwise_or(hot_mask, red_dominant)
+        color_hot = cv2.bitwise_or(orange_hot, red_hot)
+        color_hot = cv2.bitwise_or(color_hot, red_dominant)
+
+        # White-hot billet cores are valid only when they are connected to red/orange heat.
+        # This prevents shiny machine parts, rollers, and pale background objects from being boxed.
+        white_hot = cv2.inRange(v_channel, 242, 255)
+        support_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (35, 13))
+        supported_heat = cv2.dilate(color_hot, support_kernel, iterations=1)
+        supported_white_hot = cv2.bitwise_and(white_hot, supported_heat)
+        hot_mask = cv2.bitwise_or(color_hot, supported_white_hot)
 
         motion_mask = subtractor.apply(frame)
         _, motion_mask = cv2.threshold(motion_mask, 180, 255, cv2.THRESH_BINARY)
-        hot_mask = cv2.bitwise_and(hot_mask, cv2.bitwise_or(motion_mask, hot_mask))
 
         open_kernel = np.ones((3, 3), np.uint8)
         close_kernel = np.ones((5, 5), np.uint8)
@@ -307,41 +404,252 @@ class ProductCounter:
         hot_mask = cv2.morphologyEx(hot_mask, cv2.MORPH_CLOSE, close_kernel, iterations=1)
         return hot_mask, motion_mask
 
+    @staticmethod
+    def _draw_detection_label(frame, detection: Detection, width: int, height: int) -> None:
+        x, y, w, h = detection.rect
+        label = f"{detection.confidence}%"
+        text_size, _baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.4, 1)
+        label_x = max(4, min(width - text_size[0] - 6, x))
+        label_y = y - 6
+        if label_y < 88 and label_x < 230:
+            label_y = y + h + text_size[1] + 6
+        if label_y > height - 6:
+            label_y = max(text_size[1] + 4, y + text_size[1] + 4)
+        label_y = max(text_size[1] + 4, min(height - 6, label_y))
+        cv2.rectangle(
+            frame,
+            (label_x - 3, label_y - text_size[1] - 3),
+            (label_x + text_size[0] + 3, label_y + 3),
+            (15, 23, 42),
+            -1,
+        )
+        cv2.putText(frame, label, (label_x, label_y), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+
+    @staticmethod
+    def _frame_has_decode_distortion(frame) -> bool:
+        height, width = frame.shape[:2]
+        if height < 80 or width < 80:
+            return False
+
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        saturation = hsv[:, :, 1]
+        value = hsv[:, :, 2]
+        lower_area = (slice(int(height * 0.42), height), slice(0, width))
+        bright_low_detail = ((value[lower_area] > 238) & (saturation[lower_area] < 42)).astype(np.uint8)
+        lower_ratio = float(np.count_nonzero(bright_low_detail)) / max(1, bright_low_detail.size)
+
+        band_count = 6
+        band_height = max(1, bright_low_detail.shape[0] // band_count)
+        worst_band_ratio = 0.0
+        for band_index in range(band_count):
+            start = band_index * band_height
+            end = bright_low_detail.shape[0] if band_index == band_count - 1 else (band_index + 1) * band_height
+            band = bright_low_detail[start:end, :]
+            worst_band_ratio = max(worst_band_ratio, float(np.count_nonzero(band)) / max(1, band.size))
+
+        return lower_ratio > 0.28 or worst_band_ratio > 0.46
+
     def _detect_hot_billets(self, contours, width: int, height: int) -> List[Detection]:
-        detections: List[Detection] = []
-        min_area = max(280, int(self.min_box_width * self.min_box_height * 0.7))
+        segments = []
+        min_segment_area = max(90, int(self.min_box_width * self.min_box_height * 0.25))
         for contour in contours:
             area = cv2.contourArea(contour)
-            if area < min_area:
+            if area < min_segment_area:
                 continue
 
-            rect = cv2.minAreaRect(contour)
+            segment = self._contour_to_billet_segment(contour, area, width, height)
+            if segment:
+                segments.append(segment)
+
+        return self._merge_billet_segments(segments, width, height)
+
+    def _contour_to_billet_segment(self, contour, area: float, width: int, height: int):
+        rect = cv2.minAreaRect(contour)
+        (box_width, box_height) = rect[1]
+        if box_width <= 1 or box_height <= 1:
+            return None
+
+        short_side = max(1.0, min(box_width, box_height))
+        long_side = max(box_width, box_height)
+        elongation = long_side / short_side
+        if elongation < max(1.8, self.min_aspect_ratio * 0.45) or elongation > self.max_aspect_ratio * 1.35:
+            return None
+
+        box_points = cv2.boxPoints(rect)
+        unit = self._long_axis_unit(box_points)
+        if not unit:
+            return None
+
+        # In this camera angle, valid billets run mainly across the conveyor.
+        # Upright hot objects are usually people, glare, torches, or machinery.
+        if abs(unit[0]) < 0.45:
+            return None
+
+        x, y, w, h = cv2.boundingRect(contour)
+        if h < max(3, int(self.min_box_height * 0.45)):
+            return None
+        if w > self.max_box_width or h > self.max_box_height:
+            return None
+
+        center = (x + w // 2, y + h // 2)
+        if not self._point_allowed(center, width, height):
+            return None
+
+        normal = (-unit[1], unit[0])
+        points = contour.reshape(-1, 2).astype(np.float32)
+        projections = points[:, 0] * unit[0] + points[:, 1] * unit[1]
+        normal_offset = center[0] * normal[0] + center[1] * normal[1]
+        size_score = min(25, int(area / max(1, self.min_box_width * self.min_box_height) * 8))
+        shape_score = min(30, int((elongation - 1.8) * 9))
+        confidence = max(1, min(99, 42 + size_score + shape_score + 30))
+        return {
+            "points": points,
+            "center": center,
+            "area": area,
+            "length": float(long_side),
+            "thickness": float(short_side),
+            "elongation": elongation,
+            "confidence": confidence,
+            "unit": unit,
+            "normal_offset": float(normal_offset),
+            "projection_min": float(projections.min()),
+            "projection_max": float(projections.max()),
+            "angle": math.atan2(unit[1], unit[0]),
+        }
+
+    def _merge_billet_segments(self, segments, width: int, height: int) -> List[Detection]:
+        if not segments:
+            return []
+
+        groups = []
+        for segment in sorted(segments, key=lambda item: (item["normal_offset"], item["projection_min"])):
+            matched_group = None
+            for group in groups:
+                angle_gap = self._line_angle_gap(segment["angle"], group["angle"])
+                normal_gap = abs(segment["normal_offset"] - group["normal_offset"])
+                projection_gap = max(
+                    0.0,
+                    segment["projection_min"] - group["projection_max"],
+                    group["projection_min"] - segment["projection_max"],
+                )
+                normal_limit = max(7.0, min(20.0, min(segment["thickness"], group["thickness"]) * 1.1))
+                projection_limit = max(60.0, min(220.0, (segment["length"] + group["length"]) * 0.45))
+                if angle_gap <= math.radians(12) and normal_gap <= normal_limit and projection_gap <= projection_limit:
+                    matched_group = group
+                    break
+
+            if matched_group is None:
+                groups.append({
+                    "segments": [segment],
+                    "angle": segment["angle"],
+                    "normal_offset": segment["normal_offset"],
+                    "projection_min": segment["projection_min"],
+                    "projection_max": segment["projection_max"],
+                    "thickness": segment["thickness"],
+                    "length": segment["length"],
+                    "area": segment["area"],
+                    "confidence": segment["confidence"],
+                })
+                continue
+
+            matched_group["segments"].append(segment)
+            total_area = matched_group["area"] + segment["area"]
+            matched_group["angle"] = self._weighted_average_angle(matched_group["angle"], matched_group["area"], segment["angle"], segment["area"])
+            matched_group["normal_offset"] = ((matched_group["normal_offset"] * matched_group["area"]) + (segment["normal_offset"] * segment["area"])) / max(1.0, total_area)
+            matched_group["projection_min"] = min(matched_group["projection_min"], segment["projection_min"])
+            matched_group["projection_max"] = max(matched_group["projection_max"], segment["projection_max"])
+            matched_group["thickness"] = max(matched_group["thickness"], segment["thickness"])
+            matched_group["length"] = matched_group["projection_max"] - matched_group["projection_min"]
+            matched_group["area"] = total_area
+            matched_group["confidence"] = max(matched_group["confidence"], segment["confidence"])
+
+        detections: List[Detection] = []
+        min_area = max(850, int(self.min_box_width * self.min_box_height * 2.4))
+        min_long_side = self._minimum_billet_length(width)
+        for group in groups:
+            if group["area"] < min_area:
+                continue
+            if group["length"] < min_long_side:
+                continue
+
+            points = np.vstack([segment["points"] for segment in group["segments"]])
+            rect = cv2.minAreaRect(points)
             (box_width, box_height) = rect[1]
+            if box_width <= 1 or box_height <= 1:
+                continue
+
+            unit = self._long_axis_unit(cv2.boxPoints(rect))
+            if not unit or abs(unit[0]) < 0.45:
+                continue
+
             short_side = max(1.0, min(box_width, box_height))
             long_side = max(box_width, box_height)
+            if long_side < min_long_side:
+                continue
             elongation = long_side / short_side
             if elongation < self.min_aspect_ratio or elongation > self.max_aspect_ratio:
                 continue
 
-            x, y, w, h = cv2.boundingRect(contour)
+            box_points = cv2.boxPoints(rect)
+            x, y, w, h = cv2.boundingRect(box_points.astype(np.int32))
             if w < self.min_box_width or h < self.min_box_height:
                 continue
             if w > self.max_box_width or h > self.max_box_height:
                 continue
+
             center = (x + w // 2, y + h // 2)
             if not self._point_allowed(center, width, height):
                 continue
 
-            size_score = min(25, int(area / max(1, min_area) * 8))
-            shape_score = min(35, int((elongation - self.min_aspect_ratio) * 10))
-            brightness_score = 35
-            confidence = max(1, min(99, 40 + size_score + shape_score + brightness_score))
+            confidence = max(1, min(99, group["confidence"] + min(8, (len(group["segments"]) - 1) * 2)))
             if confidence < self.confidence:
                 continue
-            box_points = cv2.boxPoints(rect)
+
             box = tuple((int(point[0]), int(point[1])) for point in box_points)
             detections.append(Detection(rect=(x, y, w, h), center=center, confidence=confidence, elongation=elongation, box=box))
         return detections
+
+    @staticmethod
+    def _long_axis_unit(box_points) -> Optional[Tuple[float, float]]:
+        best_vector = None
+        best_length = 0.0
+        for index in range(4):
+            start = box_points[index]
+            end = box_points[(index + 1) % 4]
+            dx = float(end[0] - start[0])
+            dy = float(end[1] - start[1])
+            length = (dx * dx + dy * dy) ** 0.5
+            if length > best_length:
+                best_length = length
+                best_vector = (dx, dy)
+        if not best_vector or best_length <= 1:
+            return None
+        ux = best_vector[0] / best_length
+        uy = best_vector[1] / best_length
+        if ux < 0:
+            ux = -ux
+            uy = -uy
+        return (ux, uy)
+
+    @staticmethod
+    def _line_angle_gap(first: float, second: float) -> float:
+        gap = abs(first - second) % math.pi
+        return min(gap, math.pi - gap)
+
+    @staticmethod
+    def _weighted_average_angle(first: float, first_weight: float, second: float, second_weight: float) -> float:
+        x_value = (math.cos(first) * first_weight) + (math.cos(second) * second_weight)
+        y_value = (math.sin(first) * first_weight) + (math.sin(second) * second_weight)
+        if abs(x_value) < 0.0001 and abs(y_value) < 0.0001:
+            return first
+        angle = math.atan2(y_value, x_value)
+        if math.cos(angle) < 0:
+            angle += math.pi
+        return angle
+
+    @staticmethod
+    def _minimum_billet_length(width: int) -> int:
+        return max(155, int(width * 0.17))
 
     def _evaluate_scene_health(self, detections: List[Detection], hot_mask, motion_mask) -> str:
         warnings: List[dict] = []
@@ -426,7 +734,7 @@ class ProductCounter:
                     track.last_moved_frame = self.frame_index
                     track.warning_sent = False
                     self.warnings = [warning for warning in self.warnings if warning.get("code") != "STALLED_BILLET"]
-                if self.movement_direction == "AUTO" and self.expected_direction == 0 and abs(dx) > 8:
+                if self.movement_direction == "AUTO" and self.expected_direction == 0 and abs(dx) > 1.5 and abs(dx) >= abs(dy) * 0.35:
                     self.expected_direction = 1 if dx > 0 else -1
 
                 active_direction = self._active_direction_locked()
@@ -447,9 +755,13 @@ class ProductCounter:
                     continue
 
                 if active_direction > 0:
-                    crossed_gate = previous_center[0] < gate_x <= center[0]
+                    previous_edge = previous_rect[0] + previous_rect[2]
+                    current_edge = detection.rect[0] + detection.rect[2]
+                    crossed_gate = previous_edge < gate_x <= current_edge
                 else:
-                    crossed_gate = previous_center[0] > gate_x >= center[0]
+                    previous_edge = previous_rect[0]
+                    current_edge = detection.rect[0]
+                    crossed_gate = previous_edge > gate_x >= current_edge
 
                 if not track.counted and frames_alive >= 2 and crossed_gate:
                     crossing_y = self._gate_crossing_y(previous_center, center, gate_x)
@@ -518,12 +830,12 @@ class ProductCounter:
         direction = (filters.movementDirection if filters else None) or "AUTO"
         direction = direction.upper().replace(" ", "_").replace("-", "_")
         self.movement_direction = direction if direction in {"AUTO", "LEFT_TO_RIGHT", "RIGHT_TO_LEFT"} else "AUTO"
-        self.conveyor_roi = self._sanitize_polygon(filters.conveyorRoi if filters else None) or self._default_conveyor_roi()
+        self.conveyor_roi = self._sanitize_polygon(filters.conveyorRoi if filters else None)
         self.ignore_zones = [
             polygon
             for polygon in (self._sanitize_polygon(zone) for zone in (filters.ignoreZones if filters else []) or [])
             if polygon
-        ] or self._default_ignore_zones()
+        ]
 
     @staticmethod
     def _filter_int(value: Optional[int], default: int, minimum: int, maximum: int) -> int:
@@ -542,17 +854,6 @@ class ProductCounter:
         return max(minimum, min(maximum, parsed))
 
     @staticmethod
-    def _default_conveyor_roi() -> List[Tuple[float, float]]:
-        return [(0.04, 0.24), (0.78, 0.20), (0.97, 0.86), (0.06, 0.88)]
-
-    @staticmethod
-    def _default_ignore_zones() -> List[List[Tuple[float, float]]]:
-        return [
-            [(0.0, 0.0), (1.0, 0.0), (1.0, 0.18), (0.0, 0.18)],
-            [(0.84, 0.48), (1.0, 0.48), (1.0, 1.0), (0.84, 1.0)],
-        ]
-
-    @staticmethod
     def _sanitize_polygon(points: Optional[List[PointRequest]]) -> List[Tuple[float, float]]:
         if not points or len(points) < 3:
             return []
@@ -568,6 +869,8 @@ class ProductCounter:
 
     def _build_counting_mask(self, width: int, height: int):
         mask = np.zeros((height, width), dtype=np.uint8)
+        if not self.conveyor_roi:
+            return mask
         roi = self._polygon_to_pixels(self.conveyor_roi, width, height)
         cv2.fillPoly(mask, [roi], 255)
         for zone in self.ignore_zones:
@@ -575,6 +878,8 @@ class ProductCounter:
         return mask
 
     def _point_allowed(self, center: Tuple[int, int], width: int, height: int) -> bool:
+        if not self.conveyor_roi:
+            return False
         point = (float(center[0]), float(center[1]))
         roi = self._polygon_to_pixels(self.conveyor_roi, width, height)
         if cv2.pointPolygonTest(roi, point, False) < 0:
@@ -585,13 +890,12 @@ class ProductCounter:
         return True
 
     def _draw_counting_zones(self, frame, width: int, height: int) -> None:
+        if not self.conveyor_roi:
+            return
         roi = self._polygon_to_pixels(self.conveyor_roi, width, height)
-        cv2.polylines(frame, [roi], True, (255, 170, 0), 2)
+        cv2.polylines(frame, [roi], True, (0, 215, 255), 1)
         for zone in self.ignore_zones:
             points = self._polygon_to_pixels(zone, width, height)
-            overlay = frame.copy()
-            cv2.fillPoly(overlay, [points], (30, 41, 59))
-            cv2.addWeighted(overlay, 0.18, frame, 0.82, 0, frame)
             cv2.polylines(frame, [points], True, (148, 163, 184), 1)
 
     @staticmethod
@@ -677,7 +981,15 @@ def snapshot() -> Response:
         image = counter.snapshot()
     except RuntimeError:
         raise HTTPException(status_code=404, detail="No snapshot available yet")
-    return Response(content=image, media_type="image/jpeg")
+    return Response(
+        content=image,
+        media_type="image/jpeg",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
 
 
 if __name__ == "__main__":
