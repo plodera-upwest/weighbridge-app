@@ -7,6 +7,7 @@ import { readLiveWeight } from "./device-client";
 import { activateLicense, licenseStatus } from "./license";
 import { assertStrongPassword, audit, defaultSlipTemplate, hashPassword, isRole, needsPasswordRehash, nextTransactionNo, peekTransactionNo, readDb, uid, verifyPassword, writeDb } from "./repository";
 import { hasPermission, publicUser } from "./rbac";
+import { getSystemUpdateStatus, startSystemUpdate } from "./system-update";
 import { Driver, Party, Permission, Product, ProductEntry, Settings, SlipTemplate, SlipTemplateElement, User, Vehicle } from "./types";
 
 const PORT = Number(process.env.PORT || 4175);
@@ -972,6 +973,25 @@ app.get("/api/audit-logs", auth, permit("VIEW_AUDIT_LOGS"), (req, res) => {
     .filter((log) => !queryText(req.query.userId) || log.userId === queryText(req.query.userId))
     .filter((log) => !queryText(req.query.entityType) || log.entityType === queryText(req.query.entityType));
   res.json(req.query.page || req.query.limit || req.query.action || req.query.userId || req.query.entityType ? paginate(logs, req, 100) : logs.slice(0, 250));
+});
+
+app.get("/api/system-update/status", auth, permit("CHANGE_SETTINGS"), (_req, res) => {
+  res.json(getSystemUpdateStatus());
+});
+
+app.post("/api/system-update/run", auth, permit("CHANGE_SETTINGS"), (req: AuthedRequest, res) => {
+  const db = readDb();
+  const status = startSystemUpdate(req.user!.username);
+  audit(db, {
+    userId: req.user!.id,
+    userName: req.user!.name,
+    action: "SYSTEM_UPDATE",
+    entityType: "SYSTEM",
+    entityId: "weighbridge-app",
+    details: `Update started by ${req.user!.username}`
+  });
+  writeDb(db);
+  res.json(status);
 });
 
 app.patch("/api/settings", auth, permit("CHANGE_SETTINGS"), (req: AuthedRequest, res) => {

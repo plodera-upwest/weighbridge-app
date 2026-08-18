@@ -293,6 +293,92 @@
     background: #fffbeb;
   }
 
+  .system-update-card {
+    @apply grid gap-3;
+    border-color: #bfdbfe;
+    background:
+      linear-gradient(135deg, rgba(239, 246, 255, 0.88), transparent 48%),
+      #ffffff;
+  }
+
+  .system-update-grid {
+    @apply grid gap-2;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .system-update-grid span {
+    @apply grid gap-1 rounded-xl border px-3 py-2 text-xs font-semibold normal-case;
+    border-color: #dbe7f5;
+    color: #64748b;
+    background: rgba(248, 250, 252, 0.86);
+  }
+
+  .system-update-grid strong {
+    @apply truncate text-sm;
+    color: #0f172a;
+  }
+
+  .system-update-note {
+    @apply grid gap-1 rounded-xl border px-3 py-2 text-sm;
+    border-color: #dbe7f5;
+    color: #475569;
+    background: rgba(248, 250, 252, 0.72);
+  }
+
+  .system-update-note strong {
+    @apply text-xs font-bold uppercase;
+    color: #64748b;
+  }
+
+  .system-update-error,
+  .system-update-message {
+    @apply rounded-xl border px-3 py-2 text-sm font-semibold;
+  }
+
+  .system-update-error,
+  .system-update-message-error {
+    border-color: #fecaca;
+    color: #b91c1c;
+    background: #fef2f2;
+  }
+
+  .system-update-message-success {
+    border-color: #a7f3d0;
+    color: #047857;
+    background: #ecfdf5;
+  }
+
+  .system-update-message-info {
+    border-color: #bfdbfe;
+    color: #0f3f8d;
+    background: #eff6ff;
+  }
+
+  .system-update-log {
+    @apply rounded-xl border p-3 text-sm;
+    border-color: #dbe7f5;
+    background: #f8fafc;
+  }
+
+  .system-update-log summary {
+    @apply cursor-pointer font-semibold;
+    color: #0f3f8d;
+  }
+
+  .system-update-log pre {
+    @apply mt-3 overflow-auto rounded-lg p-3 text-xs;
+    max-height: 280px;
+    color: #e5e7eb;
+    background: #0f172a;
+    white-space: pre-wrap;
+  }
+
+  @media (max-width: 1200px) {
+    .system-update-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
   .camera-setting-card {
     @apply border p-3;
     border-color: #e3e2e3;

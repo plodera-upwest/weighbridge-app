@@ -131,6 +131,20 @@ type AiCountingStatus = {
   warnings?: AiCountingWarning[];
   activeTracks?: number;
 };
+type SystemUpdateStatus = {
+  enabled: boolean;
+  running: boolean;
+  scriptPath: string;
+  scriptExists: boolean;
+  workingDirectory: string;
+  currentCommit: string;
+  runner: "direct" | "systemd-run";
+  lastStartedAt?: string;
+  lastFinishedAt?: string;
+  lastExitCode?: number | null;
+  lastError?: string;
+  lastOutput: string;
+};
 type SlipTemplateElementType = "TEXT" | "FIELD" | "PRODUCT_TABLE" | "CAMERA_GROUP" | "QR" | "SIGNATURE" | "LINE";
 type SlipTemplateElement = {
   id: string;
@@ -2765,6 +2779,90 @@ function LicenseStatusPanel({ license }: { license: LicenseStatus | null }) {
   );
 }
 
+function SystemUpdatePanel({
+  status,
+  message,
+  messageTone,
+  disabled,
+  confirming,
+  busy,
+  onRefresh,
+  onRun,
+  onCancelConfirm
+}: {
+  status: SystemUpdateStatus | null;
+  message: string;
+  messageTone: "success" | "error" | "info";
+  disabled: boolean;
+  confirming: boolean;
+  busy: boolean;
+  onRefresh: () => Promise<SystemUpdateStatus | null>;
+  onRun: () => Promise<void>;
+  onCancelConfirm: () => void;
+}) {
+  const unavailableReason = !status
+    ? "Update status is not available."
+    : !status.enabled
+      ? "Server update button is disabled on this installation."
+      : !status.scriptExists
+        ? "Update script is missing on the server."
+        : "";
+  const canRun = Boolean(status?.enabled && status.scriptExists && !status.running && !disabled && !busy);
+
+  return (
+    <section className="settings-section-card system-update-card">
+      <div className="settings-license-head">
+        <div>
+          <p className="slip-eyebrow">Server Update</p>
+          <h3 className="section-title mb-0">Cloud Update Control</h3>
+          <p>Admin-only button for pulling the latest Git code, rebuilding, and restarting the Weighbridge service.</p>
+        </div>
+        <span className={`license-pill ${status?.enabled ? "license-pill-active" : "license-pill-warning"}`}>
+          {status?.running ? "RUNNING" : status?.enabled ? "READY" : "DISABLED"}
+        </span>
+      </div>
+
+      <div className="system-update-grid">
+        <span>Current commit<strong>{status?.currentCommit || "-"}</strong></span>
+        <span>Runner<strong>{status?.runner || "-"}</strong></span>
+        <span>Script<strong>{status?.scriptExists ? "Found" : "Missing"}</strong></span>
+        <span>Started<strong>{status?.lastStartedAt ? fmtSlipDateTime(status.lastStartedAt) : "-"}</strong></span>
+        <span>Finished<strong>{status?.lastFinishedAt ? fmtSlipDateTime(status.lastFinishedAt) : "-"}</strong></span>
+      </div>
+
+      <div className="system-update-note">
+        <strong>Script path</strong>
+        <span>{status?.scriptPath || "Not configured"}</span>
+      </div>
+
+      {unavailableReason && <p className="system-update-error">{unavailableReason}</p>}
+      {status?.lastError && <p className="system-update-error">{status.lastError}</p>}
+      {message && <p className={`system-update-message system-update-message-${messageTone}`}>{message}</p>}
+
+      <div className="flex flex-wrap gap-2">
+        <button className="btn secondary" type="button" onClick={() => void onRefresh()} disabled={busy}>
+          Refresh Status
+        </button>
+        <button className="btn" type="button" onClick={() => void onRun()} disabled={!canRun}>
+          {busy ? "Starting..." : confirming ? "Confirm Update" : "Update App"}
+        </button>
+        {confirming && (
+          <button className="btn secondary" type="button" onClick={onCancelConfirm} disabled={busy}>
+            Cancel Update
+          </button>
+        )}
+      </div>
+
+      {status?.lastOutput && (
+        <details className="system-update-log">
+          <summary>Latest update log</summary>
+          <pre>{status.lastOutput}</pre>
+        </details>
+      )}
+    </section>
+  );
+}
+
 function Settings({ settings, license, products, disabled, onRefresh }: { settings: Settings; license: LicenseStatus | null; products: Product[]; disabled: boolean; onRefresh: () => Promise<void> }) {
   const [weighbridges, setWeighbridges] = useState<WeighbridgeSetting[]>(() => settingsWeighbridges(settings));
   const [expandedWeighbridgeIds, setExpandedWeighbridgeIds] = useState<string[]>([]);
@@ -2787,6 +2885,11 @@ function Settings({ settings, license, products, disabled, onRefresh }: { settin
   const [message, setMessage] = useState("");
   const [messageTone, setMessageTone] = useState<"success" | "error">("success");
   const [savingSettings, setSavingSettings] = useState(false);
+  const [systemUpdateStatus, setSystemUpdateStatus] = useState<SystemUpdateStatus | null>(null);
+  const [systemUpdateMessage, setSystemUpdateMessage] = useState("");
+  const [systemUpdateTone, setSystemUpdateTone] = useState<"success" | "error" | "info">("info");
+  const [systemUpdateBusy, setSystemUpdateBusy] = useState(false);
+  const [systemUpdateConfirming, setSystemUpdateConfirming] = useState(false);
 
   useEffect(() => {
     setWeighbridges(settingsWeighbridges(settings));
@@ -2799,6 +2902,64 @@ function Settings({ settings, license, products, disabled, onRefresh }: { settin
     setSearchControlsVisible(Boolean(settings.slipSearchControlsVisible));
     setAiProductCounting(aiCountingDefaults(settings.aiProductCounting, settings.cameras[0]?.id || ""));
   }, [settings]);
+
+  const refreshSystemUpdateStatus = async () => {
+    try {
+      const nextStatus = await api<SystemUpdateStatus>("/api/system-update/status");
+      setSystemUpdateStatus(nextStatus);
+      return nextStatus;
+    } catch (error) {
+      setSystemUpdateStatus(null);
+      setSystemUpdateMessage(errorMessage(error, "Could not load system update status"));
+      setSystemUpdateTone("error");
+      return null;
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadStatus = async () => {
+      try {
+        const nextStatus = await api<SystemUpdateStatus>("/api/system-update/status");
+        if (!cancelled) setSystemUpdateStatus(nextStatus);
+      } catch (error) {
+        if (!cancelled) {
+          setSystemUpdateStatus(null);
+          setSystemUpdateMessage(errorMessage(error, "Could not load system update status"));
+          setSystemUpdateTone("error");
+        }
+      }
+    };
+    void loadStatus();
+    const timer = window.setInterval(() => void loadStatus(), 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  const runSystemUpdate = async () => {
+    if (!systemUpdateConfirming) {
+      setSystemUpdateConfirming(true);
+      setSystemUpdateMessage("Click Confirm Update to install the latest version on this server.");
+      setSystemUpdateTone("info");
+      return;
+    }
+    setSystemUpdateBusy(true);
+    setSystemUpdateMessage("");
+    try {
+      const nextStatus = await api<SystemUpdateStatus>("/api/system-update/run", { method: "POST" });
+      setSystemUpdateStatus(nextStatus);
+      setSystemUpdateConfirming(false);
+      setSystemUpdateMessage("Update started. The app may restart while the new version is installed.");
+      setSystemUpdateTone("success");
+    } catch (error) {
+      setSystemUpdateMessage(errorMessage(error, "Could not start system update"));
+      setSystemUpdateTone("error");
+    } finally {
+      setSystemUpdateBusy(false);
+    }
+  };
 
   const updateWeighbridge = (id: string, changes: Partial<WeighbridgeSetting>) => {
     setWeighbridges((current) => current.map((weighbridge) => weighbridge.id === id ? { ...weighbridge, ...changes } : weighbridge));
@@ -3025,6 +3186,21 @@ function Settings({ settings, license, products, disabled, onRefresh }: { settin
           </div>
 
           <LicenseStatusPanel license={license} />
+
+          <SystemUpdatePanel
+            status={systemUpdateStatus}
+            message={systemUpdateMessage}
+            messageTone={systemUpdateTone}
+            disabled={disabled}
+            confirming={systemUpdateConfirming}
+            busy={systemUpdateBusy}
+            onRefresh={refreshSystemUpdateStatus}
+            onRun={runSystemUpdate}
+            onCancelConfirm={() => {
+              setSystemUpdateConfirming(false);
+              setSystemUpdateMessage("");
+            }}
+          />
 
           <div className="settings-section-card">
             <button className="settings-section-header" type="button" onClick={() => toggleSettingsSection("slipEntry")} aria-expanded={!collapsedSettingsSections.slipEntry}>
