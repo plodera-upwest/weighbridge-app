@@ -2839,15 +2839,15 @@ function SystemUpdatePanel({
       {status?.lastError && <p className="system-update-error">{status.lastError}</p>}
       {message && <p className={`system-update-message system-update-message-${messageTone}`}>{message}</p>}
 
-      <div className="flex flex-wrap gap-2">
-        <button className="btn secondary" type="button" onClick={() => void onRefresh()} disabled={busy}>
+      <div className="system-update-actions">
+        <button className="btn-secondary" type="button" onClick={() => void onRefresh()} disabled={busy}>
           Refresh Status
         </button>
-        <button className="btn" type="button" onClick={() => void onRun()} disabled={!canRun}>
+        <button className="btn-primary" type="button" onClick={() => void onRun()} disabled={!canRun}>
           {busy ? "Starting..." : confirming ? "Confirm Update" : "Update App"}
         </button>
         {confirming && (
-          <button className="btn secondary" type="button" onClick={onCancelConfirm} disabled={busy}>
+          <button className="btn-secondary" type="button" onClick={onCancelConfirm} disabled={busy}>
             Cancel Update
           </button>
         )}
